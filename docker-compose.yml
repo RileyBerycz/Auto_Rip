@@ -57,20 +57,8 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
-    profiles: ["bundled-ollama"]
-    environment:
-      - HSA_OVERRIDE_GFX_VERSION
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ollama:/root/.ollama
-    restart: unless-stopped
-
 volumes:
   dvdflix-data:
   dvdflix-movies:
   dvdflix-tvshows:
   dvdflix-temp:
-  ollama:

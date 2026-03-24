@@ -29,8 +29,9 @@ Deploy in Dockge:
 Ollama behavior:
 
 - Base stack expects an external Ollama URL (default in `.env.example` points to host Ollama).
-- Bundled Ollama container is optional and disabled by default via Compose profile.
-- Enable bundled Ollama only when needed (`bundled-ollama` profile) to avoid host port `11434` conflicts.
+- Bundled Ollama is in a separate override file: `docker-compose.ollama.yml`.
+- Include that file only when you intentionally want an in-stack Ollama container.
+- This avoids accidental `11434` conflicts and reduces OOM risk on small hosts.
 
 For ripping hosts with optical drives, add the override file:
 
