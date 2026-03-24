@@ -26,6 +26,12 @@ Deploy in Dockge:
 2. Set env values in Dockge (`TMDB_API_KEY`, `OLLAMA_URL`, ports, image tag).
 3. Deploy stack.
 
+Ollama behavior:
+
+- Base stack expects an external Ollama URL (default in `.env.example` points to host Ollama).
+- Bundled Ollama container is optional and disabled by default via Compose profile.
+- Enable bundled Ollama only when needed (`bundled-ollama` profile) to avoid host port `11434` conflicts.
+
 For ripping hosts with optical drives, add the override file:
 
 ```bash
