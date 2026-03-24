@@ -53,6 +53,27 @@ body {
   gap: 10px;
 }
 
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.field span {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #b8c9a9;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fefef8;
+  color: var(--ink);
+}
+
 button {
   border: 0;
   border-radius: 8px;

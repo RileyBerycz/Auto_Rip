@@ -76,11 +76,19 @@ python scripts/auto_rip_test.py --drive /dev/sr1
 
 ## Backend API
 
-- `GET /api/health`
-- `GET /api/jobs`
-- `POST /api/jobs/start` with JSON `{ "drive": "/dev/sr1" }`
-- `POST /api/jobs/start-all`
-- `GET /api/library`
+- Public:
+	- `GET /api/setup/status`
+	- `POST /api/setup/initialize`
+	- `POST /api/auth/login`
+- Authenticated (Bearer token):
+	- `GET /api/health`
+	- `GET /api/jobs`
+	- `POST /api/jobs/start` with JSON `{ "drive": "/dev/sr1" }`
+	- `POST /api/jobs/start-all`
+	- `GET /api/library`
+	- `GET /api/settings`
+	- `POST /api/settings`
+	- `GET /api/capabilities`
 
 Socket events:
 
@@ -93,6 +101,15 @@ Socket events:
 - Ollama + TMDB identify movie title/year with cache.
 - Rip uses `makemkvcon mkv all` and writes to movies/tv path.
 - Identification is serialized; ripping remains parallel per drive.
+
+## First-Run Setup Model
+
+- On first load, the frontend opens a setup wizard.
+- Wizard creates an admin account and stores runtime settings in backend SQLite state.
+- Runtime settings are applied immediately without editing compose files.
+- Docker host permissions are still set outside the app (Dockge/Compose):
+	- Device mappings (for `/dev/sr*`)
+	- Host bind mounts for media paths
 
 ## Notes
 

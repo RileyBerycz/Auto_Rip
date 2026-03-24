@@ -21,11 +21,11 @@ def has_disc(drive: str) -> bool:
 
 
 class JobManager:
-    def __init__(self, socketio: SocketIO) -> None:
+    def __init__(self, socketio: SocketIO, settings_overrides: dict[str, str] | None = None) -> None:
         self.socketio = socketio
-        self.settings = Settings()
+        self.settings = Settings.from_overrides(settings_overrides)
         self.pipeline = RipPipeline(self.settings)
-        self.executor = ThreadPoolExecutor(max_workers=max(1, len(self.settings.drives)))
+        self.executor = ThreadPoolExecutor(max_workers=max(1, len(self.settings.drives) or 1))
         self.jobs: dict[str, RipJob] = {}
         self.inflight_by_drive: dict[str, Future] = {}
         self.lock = threading.Lock()
@@ -34,6 +34,16 @@ class JobManager:
         # Background monitor allows hands-off operation in the web app.
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
+
+    def reconfigure(self, settings_overrides: dict[str, str]) -> None:
+        with self.lock:
+            self.settings = Settings.from_overrides(settings_overrides)
+            self.pipeline = RipPipeline(self.settings)
+
+            old_executor = self.executor
+            self.executor = ThreadPoolExecutor(max_workers=max(1, len(self.settings.drives) or 1))
+
+        old_executor.shutdown(wait=False)
 
     def _emit(self, event: str, payload: dict) -> None:
         self.socketio.emit(event, payload)
