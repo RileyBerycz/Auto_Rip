@@ -53,6 +53,42 @@ body {
   gap: 10px;
 }
 
+.kv-list p {
+  margin: 0 0 8px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.status-grid p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed #d7e3ca;
+  padding-bottom: 6px;
+}
+
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  color: #fff;
+}
+
+.pill.ok {
+  background: #2f7f3c;
+}
+
+.pill.bad {
+  background: #a83838;
+}
+
 .field {
   display: grid;
   gap: 6px;

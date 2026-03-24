@@ -75,6 +75,29 @@ def _runtime_setting_keys() -> list[str]:
     ]
 
 
+def _profile_setting_keys() -> list[str]:
+    return [
+        "PROFILE_SERVER",
+        "PROFILE_STORAGE_ROOT",
+        "PROFILE_DRIVE_SR0",
+        "PROFILE_DRIVE_SR1",
+        "PROFILE_DRIVE_SR2",
+        "PROFILE_GPU",
+        "PROFILE_JELLYFIN_URL",
+        "PROFILE_OLLAMA_MODEL",
+        "PROFILE_NOTES",
+    ]
+
+
+def _profile_payload(payload: dict) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key in _profile_setting_keys():
+        value = payload.get(key)
+        if value is not None:
+            result[key] = str(value)
+    return result
+
+
 @api_bp.get("/setup/status")
 def setup_status() -> tuple:
     store = _store()
@@ -102,6 +125,7 @@ def setup_initialize() -> tuple:
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", "")).strip()
     settings_updates = _runtime_settings_payload(payload.get("settings", {}))
+    profile_updates = _profile_payload(payload.get("profile", {}))
 
     if not username or not password:
         return jsonify({"ok": False, "error": "username and password are required"}), 400
@@ -109,6 +133,7 @@ def setup_initialize() -> tuple:
     try:
         store.create_admin(username, password)
         store.upsert_settings(settings_updates)
+        store.upsert_settings(profile_updates)
         _manager().reconfigure(store.get_settings(_runtime_setting_keys()))
         token = store.login(username, password)
     except ValueError as exc:
@@ -143,6 +168,22 @@ def settings_set() -> tuple:
     updates = _runtime_settings_payload(payload)
     _store().upsert_settings(updates)
     _manager().reconfigure(_store().get_settings(_runtime_setting_keys()))
+    return jsonify({"ok": True}), 200
+
+
+@api_bp.get("/profile")
+@require_auth
+def profile_get() -> tuple:
+    values = _store().get_settings(_profile_setting_keys())
+    return jsonify({"ok": True, "profile": values}), 200
+
+
+@api_bp.post("/profile")
+@require_auth
+def profile_set() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    updates = _profile_payload(payload)
+    _store().upsert_settings(updates)
     return jsonify({"ok": True}), 200
 
 
