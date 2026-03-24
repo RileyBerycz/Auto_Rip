@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { io } from 'socket.io-client'
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:7272'
-const socketUrl = import.meta.env.VITE_SOCKET_URL || apiUrl
+const envApiUrl = import.meta.env.VITE_API_URL || ''
+const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 
 export default function App() {
+  const [apiUrlInput, setApiUrlInput] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
+  const [socketUrlInput, setSocketUrlInput] = useState(localStorage.getItem('dvdflix_socket_url') || envSocketUrl)
+  const [apiUrl, setApiUrl] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
+  const [socketUrl, setSocketUrl] = useState(localStorage.getItem('dvdflix_socket_url') || envSocketUrl)
   const [setupStatus, setSetupStatus] = useState(null)
   const [setupError, setSetupError] = useState('')
   const [token, setToken] = useState(localStorage.getItem('dvdflix_token') || '')
@@ -13,16 +17,16 @@ export default function App() {
     username: '',
     password: '',
     settings: {
-      MOVIES_PATH: '/media/movies',
-      TV_PATH: '/media/tvshows',
-      TEMP_RIP_PATH: '/media/tmp',
+      MOVIES_PATH: '',
+      TV_PATH: '',
+      TEMP_RIP_PATH: '',
       DRIVES: '',
       TMDB_API_KEY: '',
-      OLLAMA_URL: 'http://ollama:11434',
-      OLLAMA_MODEL: 'qwen2.5:7b',
-      RUNTIME_TOLERANCE_MINUTES: '8',
-      MAX_IDENTIFY_WORKERS: '1',
-      DISC_CACHE_DB: '/app/data/disc_cache.db',
+      OLLAMA_URL: '',
+      OLLAMA_MODEL: '',
+      RUNTIME_TOLERANCE_MINUTES: '',
+      MAX_IDENTIFY_WORKERS: '',
+      DISC_CACHE_DB: '',
     },
   })
   const [settingsDraft, setSettingsDraft] = useState(null)
@@ -32,11 +36,16 @@ export default function App() {
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
 
-  const socket = useMemo(() => io(socketUrl, { transports: ['websocket', 'polling'] }), [])
+  const effectiveSocketUrl = socketUrl || apiUrl
+  const socket = useMemo(() => io(effectiveSocketUrl, { autoConnect: false, transports: ['websocket', 'polling'] }), [effectiveSocketUrl])
 
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
   const refreshSetupStatus = async () => {
+    if (!apiUrl) {
+      setSetupError('Backend URL is not configured. Enter API URL below (example: http://192.168.1.50:7272).')
+      return
+    }
     try {
       const resp = await fetch(`${apiUrl}/api/setup/status`)
       if (!resp.ok) {
@@ -79,15 +88,22 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!apiUrl) {
+      return
+    }
     refreshSetupStatus()
-  }, [])
+  }, [apiUrl])
 
   useEffect(() => {
     if (!token) {
       return
     }
+    if (!effectiveSocketUrl) {
+      return
+    }
 
     fetchAuthedData()
+    socket.connect()
 
     socket.on('job_update', (job) => {
       setJobs((prev) => {
@@ -100,7 +116,17 @@ export default function App() {
     return () => {
       socket.disconnect()
     }
-  }, [socket, token])
+  }, [socket, token, effectiveSocketUrl])
+
+  const applyBackendUrls = () => {
+    const nextApi = (apiUrlInput || '').trim().replace(/\/$/, '')
+    const nextSocket = (socketUrlInput || '').trim().replace(/\/$/, '')
+    setApiUrl(nextApi)
+    setSocketUrl(nextSocket)
+    localStorage.setItem('dvdflix_api_url', nextApi)
+    localStorage.setItem('dvdflix_socket_url', nextSocket)
+    setSetupError('')
+  }
 
   const login = async () => {
     const resp = await fetch(`${apiUrl}/api/auth/login`, {
@@ -169,6 +195,18 @@ export default function App() {
     return (
       <div className="page">
         <p>Loading setup status...</p>
+        <section className="card">
+          <h2>Connection</h2>
+          <label className="field">
+            <span>Backend API URL</span>
+            <input value={apiUrlInput} onChange={(e) => setApiUrlInput(e.target.value)} placeholder="http://192.168.1.50:7272" />
+          </label>
+          <label className="field">
+            <span>Socket URL (optional, blank = same as API URL)</span>
+            <input value={socketUrlInput} onChange={(e) => setSocketUrlInput(e.target.value)} placeholder="http://192.168.1.50:7272" />
+          </label>
+          <button onClick={applyBackendUrls}>Save Connection</button>
+        </section>
         {setupError && <p className="err">{setupError}</p>}
         {setupError && <button onClick={refreshSetupStatus}>Retry</button>}
       </div>
