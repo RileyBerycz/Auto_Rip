@@ -1,0 +1,14 @@
+services:
+  backend:
+    # Use this override only on hosts with optical drives and media storage mounted.
+    devices:
+      - ${DRIVE_0:-/dev/sr0}:${DRIVE_0:-/dev/sr0}
+      - ${DRIVE_1:-/dev/sr1}:${DRIVE_1:-/dev/sr1}
+      - ${DRIVE_2:-/dev/sr2}:${DRIVE_2:-/dev/sr2}
+    volumes:
+      - ${HOST_DATA_PATH:-./data}:/app/data
+      - ${HOST_MOVIES_PATH}:${MOVIES_PATH:-/media/movies}
+      - ${HOST_TV_PATH}:${TV_PATH:-/media/tvshows}
+      - ${HOST_TEMP_RIP_PATH}:${TEMP_RIP_PATH:-/media/tmp}
+    environment:
+      DRIVES: ${DRIVES:-/dev/sr0,/dev/sr1,/dev/sr2}

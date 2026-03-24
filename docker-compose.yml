@@ -1,0 +1,55 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-backend}:${IMAGE_TAG:-latest}
+    container_name: dvdflix-backend
+    environment:
+      MOVIES_PATH: ${MOVIES_PATH:-/media/movies}
+      TV_PATH: ${TV_PATH:-/media/tvshows}
+      TEMP_RIP_PATH: ${TEMP_RIP_PATH:-/media/tmp}
+      DRIVES: ${DRIVES:-}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      RUNTIME_TOLERANCE_MINUTES: ${RUNTIME_TOLERANCE_MINUTES:-8}
+      MAX_IDENTIFY_WORKERS: ${MAX_IDENTIFY_WORKERS:-1}
+      DISC_CACHE_DB: ${DISC_CACHE_DB:-/app/data/disc_cache.db}
+      HSA_OVERRIDE_GFX_VERSION: ${HSA_OVERRIDE_GFX_VERSION:-9.0.0}
+      FLASK_ENV: production
+    ports:
+      - "${BACKEND_PORT:-7272}:7272"
+    volumes:
+      - dvdflix-data:/app/data
+      - dvdflix-movies:/media/movies
+      - dvdflix-tvshows:/media/tvshows
+      - dvdflix-temp:/media/tmp
+    restart: unless-stopped
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-frontend}:${IMAGE_TAG:-latest}
+    container_name: dvdflix-frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:7272}
+      VITE_SOCKET_URL: ${VITE_SOCKET_URL:-http://localhost:7272}
+    ports:
+      - "${FRONTEND_PORT:-7273}:7273"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dvdflix-ollama
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: ${HSA_OVERRIDE_GFX_VERSION:-9.0.0}
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  dvdflix-data:
+  dvdflix-movies:
+  dvdflix-tvshows:
+  dvdflix-temp:
+  ollama:
