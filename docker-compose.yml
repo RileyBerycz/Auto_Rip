@@ -1,6 +1,8 @@
 services:
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-backend}:${IMAGE_TAG:-latest}
+    pull_policy: always
+    command: ["python", "-m", "backend.run"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -37,6 +39,9 @@ services:
 
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-frontend}:${IMAGE_TAG:-latest}
+    pull_policy: always
+    stdin_open: true
+    tty: true
     environment:
       - VITE_API_URL
       - VITE_SOCKET_URL
