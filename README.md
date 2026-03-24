@@ -44,6 +44,13 @@ Open:
 - Frontend: `http://<host>:7273`
 - Backend health: `http://<host>:7272/api/health`
 
+### Dockge Troubleshooting
+
+- If Dockge shows `inactive` while containers appear up, redeploy stack after pulling latest compose that includes healthchecks.
+- Check backend setup endpoint directly: `http://<host>:7272/api/setup/status`.
+- If frontend only shows `Loading setup status...`, verify `VITE_API_URL` and `VITE_SOCKET_URL` point to a browser-reachable backend URL (not `localhost` unless browsing from that same host).
+- Keep bundled Ollama profile disabled unless intentionally used (`bundled-ollama`), especially when host Ollama already binds port `11434`.
+
 ## GitHub Container Publishing (GHCR)
 
 This repo includes a GitHub Actions workflow that builds and publishes:
