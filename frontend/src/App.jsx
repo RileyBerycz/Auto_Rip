@@ -6,6 +6,7 @@ const socketUrl = import.meta.env.VITE_SOCKET_URL || apiUrl
 
 export default function App() {
   const [setupStatus, setSetupStatus] = useState(null)
+  const [setupError, setSetupError] = useState('')
   const [token, setToken] = useState(localStorage.getItem('dvdflix_token') || '')
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [setupForm, setSetupForm] = useState({
@@ -36,10 +37,19 @@ export default function App() {
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
   const refreshSetupStatus = async () => {
-    const data = await fetch(`${apiUrl}/api/setup/status`).then((r) => r.json())
-    setSetupStatus(data)
-    if (data?.settings && !settingsDraft) {
-      setSettingsDraft(data.settings)
+    try {
+      const resp = await fetch(`${apiUrl}/api/setup/status`)
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`)
+      }
+      const data = await resp.json()
+      setSetupStatus(data)
+      setSetupError('')
+      if (data?.settings && !settingsDraft) {
+        setSettingsDraft(data.settings)
+      }
+    } catch (err) {
+      setSetupError(`Could not reach backend at ${apiUrl} (${err.message}). Check VITE_API_URL and backend container status.`)
     }
   }
 
@@ -156,7 +166,13 @@ export default function App() {
   }
 
   if (!setupStatus) {
-    return <div className="page"><p>Loading setup status...</p></div>
+    return (
+      <div className="page">
+        <p>Loading setup status...</p>
+        {setupError && <p className="err">{setupError}</p>}
+        {setupError && <button onClick={refreshSetupStatus}>Retry</button>}
+      </div>
+    )
   }
 
   if (!setupStatus.configured) {
