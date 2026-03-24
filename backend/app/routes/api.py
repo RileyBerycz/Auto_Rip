@@ -204,12 +204,42 @@ def capabilities() -> tuple:
     tv_ok = settings.tv_path.exists()
     temp_ok = settings.temp_rip_path.exists()
 
+    issues: list[str] = []
+    if not tools["makemkvcon"]:
+        issues.append("makemkvcon is missing in backend container/runtime")
+    if not any(drive_status.values()):
+        issues.append("No optical drives are visible inside backend container")
+    if not movies_ok:
+        issues.append(f"Movies path not found: {settings.movies_path}")
+    if not tv_ok:
+        issues.append(f"TV path not found: {settings.tv_path}")
+    if not temp_ok:
+        issues.append(f"Temp rip path not found: {settings.temp_rip_path}")
+
+    hints = [
+        "Use docker-compose.ripper.yml in Dockge for /dev/sr* device mappings and host media mounts.",
+        "Set DRIVES in app settings to comma-separated /dev/sr* values matching mapped devices.",
+        "If makemkvcon is host-only, run ripping via host auto_rip.py or provide makemkvcon inside backend runtime.",
+    ]
+
+    ripper_ready = (
+        tools["lsdvd"]
+        and tools["makemkvcon"]
+        and any(drive_status.values())
+        and movies_ok
+        and tv_ok
+        and temp_ok
+    )
+
     return (
         jsonify(
             {
                 "ok": True,
+                "ripper_ready": ripper_ready,
                 "tools": tools,
                 "drives": drive_status,
+                "issues": issues,
+                "hints": hints,
                 "paths": {
                     "movies": {"path": str(settings.movies_path), "exists": movies_ok},
                     "tv": {"path": str(settings.tv_path), "exists": tv_ok},

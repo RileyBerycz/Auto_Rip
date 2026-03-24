@@ -1,6 +1,7 @@
 services:
   backend:
     # Use this override only on hosts with optical drives and media storage mounted.
+    privileged: ${BACKEND_PRIVILEGED:-false}
     devices:
       - ${DRIVE_0:-/dev/sr0}:${DRIVE_0:-/dev/sr0}
       - ${DRIVE_1:-/dev/sr1}:${DRIVE_1:-/dev/sr1}

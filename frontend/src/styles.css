@@ -1,9 +1,19 @@
 :root {
+  --bg: #0e1318;
+  --ink: #eaf0f6;
+  --accent: #2f9f72;
+  --accent-2: #e05b5b;
+  --card: #161f27;
+  --muted: #9ab1c2;
+}
+
+body[data-theme='light'] {
   --bg: #f2f5e9;
   --ink: #172312;
   --accent: #48702f;
   --accent-2: #9f2f2f;
   --card: #fffdf6;
+  --muted: #556a4b;
 }
 
 * {
@@ -14,6 +24,10 @@ body {
   margin: 0;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   color: var(--ink);
+  background: radial-gradient(circle at 10% 10%, #17222d, #101921 60%, #0a1016);
+}
+
+body[data-theme='light'] {
   background: radial-gradient(circle at 10% 10%, #eef7d8, #dce7c3 60%, #c8d5b4);
 }
 
@@ -26,19 +40,62 @@ body {
 }
 
 .hero {
-  background: linear-gradient(135deg, #f8f7dc, #edf2c9);
-  border: 2px solid #a8b98b;
+  background: linear-gradient(135deg, #1d2a36, #223645);
+  border: 2px solid #32495a;
   border-radius: 16px;
   padding: 20px;
   animation: rise 0.45s ease-out;
 }
 
+body[data-theme='light'] .hero {
+  background: linear-gradient(135deg, #f8f7dc, #edf2c9);
+  border: 2px solid #a8b98b;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .card {
   background: var(--card);
-  border: 1px solid #c9d7b7;
+  border: 1px solid #314553;
   border-radius: 12px;
   padding: 16px;
   animation: rise 0.55s ease-out;
+}
+
+body[data-theme='light'] .card {
+  border: 1px solid #c9d7b7;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tab {
+  background: #1f3242;
+  color: var(--ink);
+  border: 1px solid #365167;
+}
+
+.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+body[data-theme='light'] .tab {
+  background: #e7efd8;
+  border: 1px solid #b6c9a2;
 }
 
 .two-col {
@@ -69,8 +126,12 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px dashed #d7e3ca;
+  border-bottom: 1px dashed #476073;
   padding-bottom: 6px;
+}
+
+body[data-theme='light'] .status-grid p {
+  border-bottom: 1px dashed #d7e3ca;
 }
 
 .pill {
@@ -97,17 +158,22 @@ body {
 
 .field span {
   font-size: 0.85rem;
-  opacity: 0.8;
+  color: var(--muted);
 }
 
 input {
   width: 100%;
-  border: 1px solid #b8c9a9;
+  border: 1px solid #415b6f;
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 10px;
-  background: #fefef8;
+  background: #0d1821;
   color: var(--ink);
+}
+
+body[data-theme='light'] input {
+  border: 1px solid #b8c9a9;
+  background: #fefef8;
 }
 
 button {
@@ -119,6 +185,11 @@ button {
   cursor: pointer;
 }
 
+.ghost {
+  background: transparent;
+  border: 1px solid #537186;
+}
+
 button:hover {
   filter: brightness(1.07);
 }
@@ -127,6 +198,10 @@ button:hover {
   border-left: 4px solid var(--accent);
   padding: 8px 12px;
   margin-bottom: 8px;
+  background: #1a2630;
+}
+
+body[data-theme='light'] .job {
   background: #f8fbe9;
 }
 
