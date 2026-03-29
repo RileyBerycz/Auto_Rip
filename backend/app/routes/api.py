@@ -714,6 +714,12 @@ def maintenance_encode_library() -> tuple:
     scope = str(payload.get("scope", "all")).strip().lower()
     suffix = str(payload.get("suffix", ".x265.mkv")).strip() or ".x265.mkv"
 
+    script_path = Path("/app/scripts/encode_library.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
+    if not shutil.which("HandBrakeCLI"):
+        return jsonify({"ok": False, "error": "HandBrakeCLI is not installed in backend image"}), 500
+
     targets: list[Path] = []
     if scope in {"all", "movies"}:
         targets.append(manager.settings.movies_path)
@@ -745,6 +751,10 @@ def maintenance_rename_library() -> tuple:
     manager = _manager()
     payload = request.get_json(silent=True) or {}
     scope = str(payload.get("scope", "all")).strip().lower()
+
+    script_path = Path("/app/scripts/rename_library.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
 
     targets: list[Path] = []
     if scope in {"all", "movies"}:

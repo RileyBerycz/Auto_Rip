@@ -4,7 +4,7 @@ import { io } from 'socket.io-client'
 const envApiUrl = import.meta.env.VITE_API_URL || ''
 const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 
-const pages = ['dashboard', 'ripper-status', 'settings', 'library', 'history', 'accounts']
+const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'history', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -264,7 +264,14 @@ export default function App() {
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(settingsDraft),
     })
-    showMessage(resp.ok ? 'Settings saved' : 'Failed to save', resp.ok ? 'success' : 'error')
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || 'Failed to save settings', 'error')
+      return
+    }
+    showMessage('Settings saved', 'success')
+    await fetchAuthedData()
+    await refreshSetupStatus()
   }
 
   const formatBytes = (bytes) => {
@@ -486,6 +493,30 @@ export default function App() {
     showMessage(resp.ok ? 'Task cancel requested' : (data.error || 'Failed to cancel task'), resp.ok ? 'info' : 'error')
     await fetchAuthedData()
   }
+
+  const allLogs = useMemo(() => {
+    const ripLogs = (jobs || []).flatMap((job) => {
+      const lines = Array.isArray(job.logs) ? job.logs : []
+      return lines.map((line) => ({
+        ts: line?.startsWith('[') ? line.slice(1, 9) : '',
+        source: `rip:${job.drive || 'unknown'}`,
+        state: job.state || 'unknown',
+        text: line,
+      }))
+    })
+
+    const taskLogs = (maintenanceTasks || []).flatMap((task) => {
+      const lines = Array.isArray(task.logs) ? task.logs : []
+      return lines.map((line) => ({
+        ts: line?.startsWith('[') ? line.slice(1, 9) : '',
+        source: task.kind || 'task',
+        state: task.state || 'unknown',
+        text: line,
+      }))
+    })
+
+    return [...ripLogs, ...taskLogs].slice(-1000)
+  }, [jobs, maintenanceTasks])
 
   // Connection Setup Page
   if (!setupStatus) {
@@ -747,6 +778,8 @@ export default function App() {
                 onClick={() => setActivePage(p)}
               >
                 {p === 'dashboard' && '📊 Dashboard'}
+                {p === 'drives' && '💿 Drives'}
+                {p === 'logs' && '🧾 Logs'}
                 {p === 'ripper-status' && '⚙️ Ripper'}
                 {p === 'settings' && '⚡ Settings'}
                 {p === 'library' && '📚 Library'}
@@ -864,14 +897,10 @@ export default function App() {
                       </div>
                       <div className="job-progress-label">{Math.max(0, Math.min(100, Number(job.progress || 0)))}%</div>
                     </div>
+                    <div className="job-stage-line">
+                      {Array.isArray(job.logs) && job.logs.length > 0 ? job.logs[job.logs.length - 1] : 'No logs yet'}
+                    </div>
                     {job.error && <div className="job-error">⚠️ {job.error}</div>}
-                    {Array.isArray(job.logs) && job.logs.length > 0 && (
-                      <div className="job-log-box">
-                        {job.logs.slice(-80).map((line, idx) => (
-                          <div key={`${job.id}-log-${idx}`} className="job-log-line">{line}</div>
-                        ))}
-                      </div>
-                    )}
                     <div className="inline-actions" style={{ marginTop: '8px' }}>
                       {isJobActive(job.state) && (
                         <button className="btn-secondary" onClick={() => cancelJob(job.id)}>
@@ -892,6 +921,80 @@ export default function App() {
                         🔍 Search & Override
                       </button>
                     )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activePage === 'drives' && (
+        <div className="content">
+          <div className="card">
+            <h2>💿 Drive Control Center</h2>
+            <div className="inline-actions" style={{ marginBottom: '12px' }}>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Drives</button>
+            </div>
+            {driveStatus.drives.length === 0 ? (
+              <p className="empty-state">No drives detected.</p>
+            ) : (
+              <div className="drive-grid">
+                {driveStatus.drives.map((d) => {
+                  const activeJob = jobs.find((j) => j.drive === d.drive && isJobActive(j.state))
+                  const latestLog = Array.isArray(activeJob?.logs) && activeJob.logs.length > 0 ? activeJob.logs[activeJob.logs.length - 1] : ''
+                  return (
+                    <div key={`drive-card-${d.drive}`} className="card drive-card">
+                      <div className="drive-card-header">
+                        <h3>{d.drive}</h3>
+                        {activeJob && <span className="disc-spinner" title={`${activeJob.state} in progress`} />}
+                      </div>
+                      <div className="info-list">
+                        <div className="info-item"><span className="label">State</span><span className="value">{d.status}</span></div>
+                        <div className="info-item"><span className="label">Has Disc</span><span className="value">{d.has_disc ? 'yes' : 'no'}</span></div>
+                        <div className="info-item"><span className="label">Readable</span><span className="value">{d.readable ? 'yes' : 'no'}</span></div>
+                        <div className="info-item"><span className="label">Source</span><span className="value">{d.source || 'n/a'}</span></div>
+                      </div>
+                      <div className="job-stage-line">{d.detail}</div>
+                      {activeJob && (
+                        <>
+                          <div className="job-progress-wrap">
+                            <div className="job-progress-bar">
+                              <div className="job-progress-fill" style={{ width: `${Math.max(0, Math.min(100, Number(activeJob.progress || 0)))}%` }} />
+                            </div>
+                            <div className="job-progress-label">{Math.max(0, Math.min(100, Number(activeJob.progress || 0)))}%</div>
+                          </div>
+                          <div className="job-stage-line">{latestLog || activeJob.state}</div>
+                        </>
+                      )}
+                      <div className="inline-actions" style={{ marginTop: '10px' }}>
+                        <button className="btn-secondary" onClick={() => startDrive(d.drive)}>Start</button>
+                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>Eject</button>
+                        {activeJob && <button className="btn-secondary" onClick={() => cancelJob(activeJob.id)}>Terminate</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activePage === 'logs' && (
+        <div className="content">
+          <div className="card">
+            <h2>🧾 Unified Logs</h2>
+            <div className="inline-actions" style={{ marginBottom: '10px' }}>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Logs</button>
+            </div>
+            {allLogs.length === 0 ? (
+              <p className="empty-state">No logs yet.</p>
+            ) : (
+              <div className="job-log-box" style={{ maxHeight: '520px' }}>
+                {allLogs.map((entry, idx) => (
+                  <div key={`log-${idx}`} className="job-log-line">
+                    [{entry.source}] {entry.text}
                   </div>
                 ))}
               </div>

@@ -495,6 +495,17 @@ button {
   border-top: 1px solid var(--card-border);
 }
 
+.job-stage-line {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--ink-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 8px;
+  word-break: break-word;
+}
+
 .job-progress-wrap {
   margin-top: 8px;
   display: grid;
@@ -654,6 +665,27 @@ button {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.drive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.drive-card {
+  padding: 16px;
+}
+
+.drive-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.drive-card-header h3 {
+  margin: 0;
 }
 
 /* File List */
