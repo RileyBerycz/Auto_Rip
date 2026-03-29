@@ -18,9 +18,9 @@ def build_output_dir(base_path: Path, title: str, year: int | None = None) -> Pa
     return out
 
 
-def run_makemkv(drive: str, output_dir: Path) -> tuple[bool, str]:
+def run_makemkv(drive: str, output_dir: Path, makemkvcon_path: str = "makemkvcon") -> tuple[bool, str]:
     # Use `all` to avoid lsdvd 1-based vs makemkv 0-based title index mismatch.
-    cmd = ["makemkvcon", "mkv", "all", drive, str(output_dir)]
+    cmd = [makemkvcon_path, "mkv", "all", drive, str(output_dir)]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         return False, proc.stderr.strip() or proc.stdout.strip()

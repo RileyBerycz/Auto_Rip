@@ -56,7 +56,11 @@ class RipPipeline:
                 target_root = self.settings.tv_path
 
             output_dir = build_output_dir(target_root, identified.title, identified.year)
-            ok, message = run_makemkv(drive, output_dir)
+            ok, message = run_makemkv(
+                drive,
+                output_dir,
+                makemkvcon_path=self.settings.makemkvcon_path,
+            )
             if not ok:
                 job.state = JobState.failed
                 job.error = message

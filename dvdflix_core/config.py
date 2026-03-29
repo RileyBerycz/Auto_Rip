@@ -51,6 +51,7 @@ class Settings:
     enable_web_search: bool = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
     searxng_url: str = os.getenv("SEARXNG_URL", "")
     handbrake_preset: str = os.getenv("HANDBRAKE_PRESET", "default")
+    makemkvcon_path: str = os.getenv("MAKEMKVCON_PATH", "makemkvcon")
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, str] | None) -> "Settings":
@@ -103,6 +104,8 @@ class Settings:
             settings.searxng_url = overrides["SEARXNG_URL"]
         if overrides.get("HANDBRAKE_PRESET"):
             settings.handbrake_preset = overrides["HANDBRAKE_PRESET"]
+        if overrides.get("MAKEMKVCON_PATH"):
+            settings.makemkvcon_path = overrides["MAKEMKVCON_PATH"]
 
         return settings
 
@@ -126,6 +129,7 @@ class Settings:
             "ENABLE_WEB_SEARCH": "true" if self.enable_web_search else "false",
             "SEARXNG_URL": self.searxng_url,
             "HANDBRAKE_PRESET": self.handbrake_preset,
+            "MAKEMKVCON_PATH": self.makemkvcon_path,
         }
 
     def ensure_dirs(self) -> None:

@@ -11,6 +11,14 @@ from dvdflix_core.config import discover_optical_drives
 api_bp = Blueprint("api", __name__)
 
 
+def _tool_exists(tool_cmd: str) -> bool:
+    if not tool_cmd:
+        return False
+    if "/" in tool_cmd:
+        return Path(tool_cmd).exists()
+    return bool(shutil.which(tool_cmd))
+
+
 def _manager():
     return current_app.extensions["job_manager"]
 
@@ -68,6 +76,7 @@ def _runtime_settings_payload(payload: dict) -> dict[str, str]:
         "ENABLE_WEB_SEARCH",
         "SEARXNG_URL",
         "HANDBRAKE_PRESET",
+        "MAKEMKVCON_PATH",
     ]
     result: dict[str, str] = {}
     for key in keys:
@@ -97,6 +106,7 @@ def _runtime_setting_keys() -> list[str]:
         "ENABLE_WEB_SEARCH",
         "SEARXNG_URL",
         "HANDBRAKE_PRESET",
+        "MAKEMKVCON_PATH",
     ]
 
 
@@ -262,7 +272,7 @@ def capabilities() -> tuple:
 
     tools = {
         "lsdvd": bool(shutil.which("lsdvd")),
-        "makemkvcon": bool(shutil.which("makemkvcon")),
+        "makemkvcon": _tool_exists(settings.makemkvcon_path),
         "eject": bool(shutil.which("eject")),
     }
     drive_status = {drive: Path(drive).exists() for drive in settings.drives}
@@ -273,7 +283,7 @@ def capabilities() -> tuple:
 
     issues: list[str] = []
     if not tools["makemkvcon"]:
-        issues.append("makemkvcon is missing in backend container/runtime")
+        issues.append(f"makemkvcon is missing in backend container/runtime ({settings.makemkvcon_path})")
     if not any(drive_status.values()):
         issues.append("No optical drives are visible inside backend container")
     if not movies_ok:

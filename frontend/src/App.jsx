@@ -54,6 +54,7 @@ export default function App() {
       ENABLE_WEB_SEARCH: 'false',
       SEARXNG_URL: '',
       HANDBRAKE_PRESET: 'default',
+      MAKEMKVCON_PATH: 'makemkvcon',
     },
     profile: {
       PROFILE_SERVER: '',
@@ -550,6 +551,11 @@ export default function App() {
                   <option value="standard">standard (main feature)</option>
                 </select>
               </div>
+              <div className="form-group">
+                <label>MakeMKV Command Path</label>
+                <input value={setupForm.settings.MAKEMKVCON_PATH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, MAKEMKVCON_PATH: e.target.value } })} />
+                <small className="field-help">Default: `makemkvcon`</small>
+              </div>
             </div>
           </div>
 
@@ -869,6 +875,10 @@ export default function App() {
                       <option value="default">default (all tracks)</option>
                       <option value="standard">standard (main feature)</option>
                     </select>
+                  </div>
+                  <div className="form-group">
+                    <label>MakeMKV Command Path</label>
+                    <input value={settingsDraft.MAKEMKVCON_PATH || 'makemkvcon'} onChange={(e) => setSettingsDraft({ ...settingsDraft, MAKEMKVCON_PATH: e.target.value })} />
                   </div>
                 </div>
                 <button className="btn-primary" onClick={saveSettings}>
