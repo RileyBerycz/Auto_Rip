@@ -157,7 +157,16 @@ class DiscIdentifier:
 
         runtime = pick_feature_track_runtime(disc)
         languages = sorted({lang for t in disc.tracks for lang in t.audio_languages})
-        llm_guess = self.ollama.identify_from_disc(disc.label, runtime, languages)
+        try:
+            llm_guess = self.ollama.identify_from_disc(disc.label, runtime, languages)
+        except Exception:  # noqa: BLE001
+            # Keep pipeline running when Ollama is unavailable; TMDB + fallback label still work.
+            llm_guess = {
+                "media_type": "movie",
+                "title": disc.label.replace("_", " ").strip(),
+                "year": None,
+                "confidence": 0.25,
+            }
 
         tmdb_candidates = self._build_tmdb_candidates(str(llm_guess.get("title") or ""), disc.label)
         scored = self.crosscheck.score_candidates(

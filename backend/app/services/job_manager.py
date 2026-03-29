@@ -22,6 +22,14 @@ def _canonical_drive_key(drive: str) -> str:
         return str(p)
 
 
+def _preferred_display_drive(drive: str) -> str:
+    canonical = _canonical_drive_key(drive)
+    # If /dev/cdrom or /dev/dvd resolves to /dev/srX, show /dev/srX in UI.
+    if canonical.startswith("/dev/sr"):
+        return canonical
+    return drive
+
+
 def probe_drive_status(drive: str) -> dict[str, str | bool]:
     exists = Path(drive).exists()
     if not exists:
@@ -100,6 +108,8 @@ class JobManager:
         self.executor = ThreadPoolExecutor(max_workers=max(1, len(self.settings.drives) or 1))
         self.jobs: dict[str, RipJob] = {}
         self.inflight_by_drive: dict[str, Future] = {}
+        self.inflight_job_by_drive: dict[str, str] = {}
+        self.cancel_flags: dict[str, threading.Event] = {}
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
 
@@ -142,8 +152,22 @@ class JobManager:
                 job.media_type = str(updates.get("media_type", "movie"))
             if updates.get("error") is not None:
                 job.error = str(updates.get("error", ""))
+            if updates.get("progress") is not None:
+                try:
+                    job.progress = max(0, min(100, int(updates.get("progress", 0))))
+                except (TypeError, ValueError):
+                    pass
+            if updates.get("logs") is not None and isinstance(updates.get("logs"), list):
+                job.logs = [str(x) for x in updates.get("logs", [])]
             job.updated_at = datetime.utcnow()
             return True
+
+    def _append_job_log(self, job: RipJob, message: str) -> None:
+        ts = datetime.utcnow().strftime("%H:%M:%S")
+        job.logs.append(f"[{ts}] {message}")
+        # Keep latest 500 lines to avoid unbounded memory growth.
+        if len(job.logs) > 500:
+            job.logs = job.logs[-500:]
 
     def list_history(self, limit: int = 500) -> list[dict[str, str]]:
         return self.pipeline.cache.list_disc_history(limit=limit)
@@ -182,6 +206,54 @@ class JobManager:
             self.inflight_by_drive[drive] = future
             return {"ok": True}
 
+    def cancel_job(self, job_id: str) -> dict:
+        with self.lock:
+            event = self.cancel_flags.get(job_id)
+            if not event:
+                return {"ok": False, "error": "job not found or not running"}
+            event.set()
+            job = self.jobs.get(job_id)
+            if job:
+                self._append_job_log(job, "Cancellation requested")
+                job.updated_at = datetime.utcnow()
+
+        return {"ok": True}
+
+    def cleanup_job_output(self, job_id: str) -> dict:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return {"ok": False, "error": "job not found"}
+            output_path = (job.output_path or "").strip()
+
+        if not output_path:
+            return {"ok": False, "error": "job has no output path"}
+
+        path = Path(output_path)
+        if not path.exists():
+            return {"ok": False, "error": f"output path not found: {output_path}"}
+
+        try:
+            if path.is_file():
+                path.unlink(missing_ok=True)
+            else:
+                for child in sorted(path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                    if child.is_file() or child.is_symlink():
+                        child.unlink(missing_ok=True)
+                    elif child.is_dir():
+                        child.rmdir()
+                path.rmdir()
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job:
+                self._append_job_log(job, f"Output cleaned: {output_path}")
+                job.output_path = ""
+                job.updated_at = datetime.utcnow()
+        return {"ok": True, "message": "output cleaned"}
+
     def start_all(self) -> dict:
         result: dict[str, dict] = {}
         for drive in self.settings.drives:
@@ -189,16 +261,53 @@ class JobManager:
         return {"ok": True, "result": result}
 
     def _run_pipeline_job(self, drive: str) -> None:
-        pending = RipJob(id=f"queued-{int(time.time())}-{drive}", drive=drive, state=JobState.pending)
+        safe_drive = drive.replace("/", "_")
+        pending = RipJob(id=f"job-{int(time.time() * 1000)}-{safe_drive}", drive=drive, state=JobState.pending)
+        pending.progress = 5
+        self._append_job_log(pending, f"Queued job for {drive}")
+        cancel_event = threading.Event()
         with self.lock:
             self.jobs[pending.id] = pending
+            self.cancel_flags[pending.id] = cancel_event
+            self.inflight_job_by_drive[drive] = pending.id
         self._emit("job_update", pending.to_dict())
 
-        job = self.pipeline.run_for_drive(drive)
+        def _on_progress(state: str, progress: int, message: str) -> None:
+            with self.lock:
+                queued = self.jobs.get(pending.id)
+                if not queued:
+                    return
+                try:
+                    queued.state = JobState(state)
+                except ValueError:
+                    pass
+                queued.progress = max(0, min(100, int(progress)))
+                self._append_job_log(queued, message)
+                queued.updated_at = datetime.utcnow()
+                payload = queued.to_dict()
+            self._emit("job_update", payload)
+
+        job = self.pipeline.run_for_drive(
+            drive,
+            progress_cb=_on_progress,
+            should_cancel=cancel_event.is_set,
+            job_id=pending.id,
+        )
+        if pending.logs:
+            job.logs = pending.logs + (job.logs or [])
+        if job.progress <= 0:
+            if job.state == JobState.complete:
+                job.progress = 100
+            elif job.state == JobState.failed:
+                job.progress = 100
+            elif job.state == JobState.ripping:
+                job.progress = 70
         job.updated_at = datetime.utcnow()
         with self.lock:
             self.jobs[job.id] = job
             self.inflight_by_drive.pop(drive, None)
+            self.inflight_job_by_drive.pop(drive, None)
+            self.cancel_flags.pop(job.id, None)
 
         self._emit("job_update", job.to_dict())
 
@@ -217,7 +326,7 @@ class JobManager:
             time.sleep(10)
 
     def list_drive_statuses(self) -> list[dict[str, str | bool]]:
-        configured = list(self.settings.drives)
+        configured = [_preferred_display_drive(d) for d in self.settings.drives]
         detected = discover_optical_drives()
 
         merged = configured + [d for d in detected if d not in configured]

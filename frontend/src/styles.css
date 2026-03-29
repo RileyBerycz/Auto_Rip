@@ -495,6 +495,55 @@ button {
   border-top: 1px solid var(--card-border);
 }
 
+.job-progress-wrap {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.job-progress-bar {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  overflow: hidden;
+}
+
+.job-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--info), var(--accent));
+  transition: width 0.25s ease;
+}
+
+.job-progress-label {
+  font-size: 0.8rem;
+  color: var(--ink-secondary);
+  min-width: 34px;
+  text-align: right;
+}
+
+.job-log-box {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  background: #0b0f13;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.job-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d7e4ef;
+}
+
 .empty-state {
   text-align: center;
   padding: 40px 20px;
@@ -566,6 +615,33 @@ button {
   font-family: monospace;
   font-size: 0.92rem;
   color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disc-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #c7d5df;
+  border-top-color: var(--accent);
+  border-right-color: var(--info);
+  display: inline-block;
+  animation: spinDisc 0.9s linear infinite;
+  position: relative;
+}
+
+.disc-spinner::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--bg);
 }
 
 .drive-status-meta {
@@ -819,6 +895,15 @@ button {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes spinDisc {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

@@ -9,6 +9,9 @@ class JobState(str, Enum):
     pending = "pending"
     identifying = "identifying"
     ripping = "ripping"
+    encoding = "encoding"
+    postprocessing = "postprocessing"
+    canceled = "canceled"
     complete = "complete"
     failed = "failed"
 
@@ -47,6 +50,8 @@ class RipJob:
     media_type: str = "movie"
     output_path: str = ""
     error: str = ""
+    progress: int = 0
+    logs: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
@@ -60,6 +65,8 @@ class RipJob:
             "media_type": self.media_type,
             "output_path": self.output_path,
             "error": self.error,
+            "progress": self.progress,
+            "logs": self.logs,
             "created_at": self.created_at.isoformat() + "Z",
             "updated_at": self.updated_at.isoformat() + "Z",
         }

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
@@ -10,6 +16,11 @@ from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.ripper import eject_drive
 
 api_bp = Blueprint("api", __name__)
+
+_task_executor = ThreadPoolExecutor(max_workers=1)
+_task_lock = threading.Lock()
+_tasks: dict[str, dict] = {}
+_task_procs: dict[str, subprocess.Popen] = {}
 
 
 def _tool_exists(tool_cmd: str) -> bool:
@@ -22,6 +33,79 @@ def _tool_exists(tool_cmd: str) -> bool:
 
 def _manager():
     return current_app.extensions["job_manager"]
+
+
+def _append_task_log(task: dict, message: str) -> None:
+    ts = datetime.utcnow().strftime("%H:%M:%S")
+    task.setdefault("logs", []).append(f"[{ts}] {message}")
+    if len(task["logs"]) > 500:
+        task["logs"] = task["logs"][-500:]
+
+
+def _create_task(kind: str, command: list[str]) -> dict:
+    task_id = str(uuid.uuid4())
+    task = {
+        "id": task_id,
+        "kind": kind,
+        "state": "queued",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "command": command,
+        "logs": [],
+    }
+    with _task_lock:
+        _tasks[task_id] = task
+    return task
+
+
+def _run_task(task_id: str) -> None:
+    with _task_lock:
+        task = _tasks.get(task_id)
+        if not task:
+            return
+        if task.get("state") == "canceled":
+            return
+        task["state"] = "running"
+        task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        _append_task_log(task, "Task started")
+        cmd = list(task.get("command", []))
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        with _task_lock:
+            _task_procs[task_id] = proc
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            with _task_lock:
+                task = _tasks.get(task_id)
+                if not task:
+                    continue
+                _append_task_log(task, line)
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+        rc = proc.wait()
+        with _task_lock:
+            task = _tasks.get(task_id)
+            if task:
+                task["state"] = "complete" if rc == 0 else "failed"
+                task["return_code"] = rc
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                _append_task_log(task, f"Task finished with code {rc}")
+            _task_procs.pop(task_id, None)
+    except Exception as exc:  # noqa: BLE001
+        with _task_lock:
+            task = _tasks.get(task_id)
+            if task:
+                task["state"] = "failed"
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                _append_task_log(task, f"Task crashed: {exc}")
+            _task_procs.pop(task_id, None)
 
 
 def _store():
@@ -132,6 +216,30 @@ def _profile_payload(payload: dict) -> dict[str, str]:
         if value is not None:
             result[key] = str(value)
     return result
+
+
+def _list_temp_entries(root: Path, limit: int = 500) -> list[dict]:
+    if not root.exists():
+        return []
+
+    entries: list[dict] = []
+    for p in sorted(root.rglob("*")):
+        if len(entries) >= limit:
+            break
+        try:
+            rel = str(p.relative_to(root))
+            stat = p.stat()
+            entries.append(
+                {
+                    "path": rel,
+                    "is_dir": p.is_dir(),
+                    "size": 0 if p.is_dir() else int(stat.st_size),
+                    "modified": int(stat.st_mtime),
+                }
+            )
+        except OSError:
+            continue
+    return entries
 
 
 @api_bp.get("/setup/status")
@@ -406,6 +514,22 @@ def start_all() -> tuple:
     return jsonify(_manager().start_all()), 200
 
 
+@api_bp.post("/jobs/<job_id>/cancel")
+@require_auth
+def cancel_job(job_id: str) -> tuple:
+    result = _manager().cancel_job(job_id)
+    code = 200 if result.get("ok") else 404
+    return jsonify(result), code
+
+
+@api_bp.post("/jobs/<job_id>/cleanup-output")
+@require_auth
+def cleanup_job_output(job_id: str) -> tuple:
+    result = _manager().cleanup_job_output(job_id)
+    code = 200 if result.get("ok") else 409
+    return jsonify(result), code
+
+
 @api_bp.get("/library")
 @require_auth
 def library() -> tuple:
@@ -425,6 +549,58 @@ def library() -> tuple:
         ),
         200,
     )
+
+
+@api_bp.get("/temp-files")
+@require_auth
+def temp_files() -> tuple:
+    manager = _manager()
+    root = manager.settings.temp_rip_path
+    entries = _list_temp_entries(root)
+    files = [e for e in entries if not e.get("is_dir")]
+    total_bytes = sum(int(e.get("size", 0)) for e in files)
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "root": str(root),
+                "exists": root.exists(),
+                "entries": entries,
+                "summary": {
+                    "count": len(entries),
+                    "file_count": len(files),
+                    "total_bytes": total_bytes,
+                },
+            }
+        ),
+        200,
+    )
+
+
+@api_bp.post("/temp-files/cleanup")
+@require_auth
+def temp_files_cleanup() -> tuple:
+    manager = _manager()
+    root = manager.settings.temp_rip_path
+    if not root.exists():
+        return jsonify({"ok": True, "removed": 0, "message": "Temp path does not exist"}), 200
+
+    removed = 0
+    errors: list[str] = []
+
+    # Delete files first, then directories deepest-first.
+    for p in sorted(root.rglob("*"), key=lambda x: len(x.parts), reverse=True):
+        try:
+            if p.is_file() or p.is_symlink():
+                p.unlink(missing_ok=True)
+                removed += 1
+            elif p.is_dir():
+                p.rmdir()
+                removed += 1
+        except OSError as exc:
+            errors.append(f"{p}: {exc}")
+
+    return jsonify({"ok": len(errors) == 0, "removed": removed, "errors": errors}), 200
 
 
 @api_bp.post("/jobs/<job_id>/override-title")
@@ -520,3 +696,101 @@ def update_history(disc_hash: str) -> tuple:
     if not ok:
         return jsonify({"ok": False, "error": "history record not found"}), 404
     return jsonify({"ok": True}), 200
+
+
+@api_bp.get("/maintenance/tasks")
+@require_auth
+def maintenance_tasks() -> tuple:
+    with _task_lock:
+        ordered = sorted(_tasks.values(), key=lambda x: x.get("updated_at", ""), reverse=True)
+    return jsonify({"ok": True, "tasks": ordered[:50]}), 200
+
+
+@api_bp.post("/maintenance/encode-library")
+@require_auth
+def maintenance_encode_library() -> tuple:
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "all")).strip().lower()
+    suffix = str(payload.get("suffix", ".x265.mkv")).strip() or ".x265.mkv"
+
+    targets: list[Path] = []
+    if scope in {"all", "movies"}:
+        targets.append(manager.settings.movies_path)
+    if scope in {"all", "tv"}:
+        targets.append(manager.settings.tv_path)
+    if not targets:
+        return jsonify({"ok": False, "error": "scope must be one of all|movies|tv"}), 400
+
+    task_ids: list[str] = []
+    for root in targets:
+        cmd = [
+            sys.executable,
+            "/app/scripts/encode_library.py",
+            "--root",
+            str(root),
+            "--suffix",
+            suffix,
+        ]
+        task = _create_task("encode-library", cmd)
+        task_ids.append(task["id"])
+        _task_executor.submit(_run_task, task["id"])
+
+    return jsonify({"ok": True, "task_ids": task_ids}), 202
+
+
+@api_bp.post("/maintenance/rename-library")
+@require_auth
+def maintenance_rename_library() -> tuple:
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "all")).strip().lower()
+
+    targets: list[Path] = []
+    if scope in {"all", "movies"}:
+        targets.append(manager.settings.movies_path)
+    if scope in {"all", "tv"}:
+        targets.append(manager.settings.tv_path)
+    if not targets:
+        return jsonify({"ok": False, "error": "scope must be one of all|movies|tv"}), 400
+
+    task_ids: list[str] = []
+    for root in targets:
+        cmd = [
+            sys.executable,
+            "/app/scripts/rename_library.py",
+            "--root",
+            str(root),
+        ]
+        task = _create_task("rename-library", cmd)
+        task_ids.append(task["id"])
+        _task_executor.submit(_run_task, task["id"])
+
+    return jsonify({"ok": True, "task_ids": task_ids}), 202
+
+
+@api_bp.post("/maintenance/tasks/<task_id>/cancel")
+@require_auth
+def maintenance_cancel_task(task_id: str) -> tuple:
+    with _task_lock:
+        task = _tasks.get(task_id)
+        if not task:
+            return jsonify({"ok": False, "error": "task not found"}), 404
+
+        state = str(task.get("state", ""))
+        if state in {"complete", "failed", "canceled"}:
+            return jsonify({"ok": False, "error": f"task already {state}"}), 409
+
+        proc = _task_procs.get(task_id)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            task["state"] = "canceled"
+            task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            _append_task_log(task, "Cancellation requested")
+            return jsonify({"ok": True}), 200
+
+        # queued but not started yet
+        task["state"] = "canceled"
+        task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        _append_task_log(task, "Canceled before start")
+        return jsonify({"ok": True}), 200

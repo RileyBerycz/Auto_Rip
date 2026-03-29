@@ -7,6 +7,7 @@ RUN set -eux; \
         apt-get install -y --no-install-recommends \
             lsdvd \
             eject \
+            handbrake-cli \
             ca-certificates \
             build-essential \
             automake \
@@ -55,6 +56,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY dvdflix_core /app/dvdflix_core
 COPY backend /app/backend
+COPY scripts /app/scripts
 
 ENV PYTHONPATH=/app
 EXPOSE 7272

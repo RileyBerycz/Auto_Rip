@@ -76,6 +76,9 @@ export default function App() {
   const [driveStatus, setDriveStatus] = useState({ drives: [], summary: null })
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
+  const [tempFiles, setTempFiles] = useState({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } })
+  const [maintenanceTasks, setMaintenanceTasks] = useState([])
+  const [maintenanceScope, setMaintenanceScope] = useState('all')
   const [history, setHistory] = useState([])
   const [accounts, setAccounts] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
@@ -124,7 +127,7 @@ export default function App() {
   }
 
   const fetchAuthedData = async () => {
-    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes] = await Promise.all([
+    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes, tempRes, maintenanceRes] = await Promise.all([
       fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
@@ -134,6 +137,8 @@ export default function App() {
       fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/drives/status`, { headers: authHeaders }),
+      fetch(`${apiUrl}/api/temp-files`, { headers: authHeaders }),
+      fetch(`${apiUrl}/api/maintenance/tasks`, { headers: authHeaders }),
     ])
 
     if (healthRes.status === 401) {
@@ -148,6 +153,15 @@ export default function App() {
     setCapabilities(await capRes.json())
     const drivesData = await drivesRes.json().catch(() => ({ drives: [], summary: null }))
     setDriveStatus({ drives: drivesData?.drives || [], summary: drivesData?.summary || null })
+    const tempData = await tempRes.json().catch(() => ({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } }))
+    setTempFiles({
+      root: tempData?.root || '',
+      exists: !!tempData?.exists,
+      entries: tempData?.entries || [],
+      summary: tempData?.summary || { count: 0, file_count: 0, total_bytes: 0 },
+    })
+    const maintenanceData = await maintenanceRes.json().catch(() => ({ tasks: [] }))
+    setMaintenanceTasks(maintenanceData?.tasks || [])
 
     const settingsData = await settingsRes.json()
     if (settingsData?.settings) setSettingsDraft(settingsData.settings)
@@ -251,6 +265,61 @@ export default function App() {
       body: JSON.stringify(settingsDraft),
     })
     showMessage(resp.ok ? 'Settings saved' : 'Failed to save', resp.ok ? 'success' : 'error')
+  }
+
+  const formatBytes = (bytes) => {
+    const value = Number(bytes || 0)
+    if (value < 1024) return `${value} B`
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  }
+
+  const clearTempFolder = async () => {
+    const ok = window.confirm('Delete all files and folders under TEMP_RIP_PATH? This cannot be undone.')
+    if (!ok) return
+
+    const resp = await fetch(`${apiUrl}/api/temp-files/cleanup`, {
+      method: 'POST',
+      headers: { ...authHeaders },
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok || data?.ok === false) {
+      showMessage(data.error || `Cleanup completed with errors (${(data?.errors || []).length || 0})`, 'error')
+    } else {
+      showMessage(`Temp cleanup complete (${data.removed || 0} items removed)`, 'success')
+    }
+    await fetchAuthedData()
+  }
+
+  const runEncodeLibrary = async () => {
+    const resp = await fetch(`${apiUrl}/api/maintenance/encode-library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ scope: maintenanceScope, suffix: '.x265.mkv' }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || 'Failed to queue encode task', 'error')
+      return
+    }
+    showMessage('Encode task queued', 'success')
+    await fetchAuthedData()
+  }
+
+  const runRenameLibrary = async () => {
+    const resp = await fetch(`${apiUrl}/api/maintenance/rename-library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ scope: maintenanceScope }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || 'Failed to queue rename task', 'error')
+      return
+    }
+    showMessage('Rename task queued', 'success')
+    await fetchAuthedData()
   }
 
   const startAll = async () => {
@@ -377,10 +446,45 @@ export default function App() {
       case 'complete': return '#10b981'
       case 'failed': return '#ef4444'
       case 'ripping': return '#f59e0b'
+      case 'encoding': return '#8b5cf6'
+      case 'postprocessing': return '#06b6d4'
+      case 'canceled': return '#64748b'
       case 'identifying': return '#3b82f6'
       case 'pending': return '#6b7280'
       default: return '#999'
     }
+  }
+
+  const isJobActive = (state) => ['pending', 'identifying', 'ripping', 'encoding', 'postprocessing'].includes(state)
+
+  const cancelJob = async (jobId) => {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/cancel`, {
+      method: 'POST',
+      headers: { ...authHeaders },
+    })
+    const data = await resp.json().catch(() => ({}))
+    showMessage(resp.ok ? 'Cancel requested' : (data.error || 'Failed to cancel job'), resp.ok ? 'info' : 'error')
+    await fetchAuthedData()
+  }
+
+  const cleanupJobOutput = async (jobId) => {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/cleanup-output`, {
+      method: 'POST',
+      headers: { ...authHeaders },
+    })
+    const data = await resp.json().catch(() => ({}))
+    showMessage(resp.ok ? (data.message || 'Output cleaned') : (data.error || 'Failed to clean output'), resp.ok ? 'success' : 'error')
+    await fetchAuthedData()
+  }
+
+  const cancelMaintenanceTask = async (taskId) => {
+    const resp = await fetch(`${apiUrl}/api/maintenance/tasks/${taskId}/cancel`, {
+      method: 'POST',
+      headers: { ...authHeaders },
+    })
+    const data = await resp.json().catch(() => ({}))
+    showMessage(resp.ok ? 'Task cancel requested' : (data.error || 'Failed to cancel task'), resp.ok ? 'info' : 'error')
+    await fetchAuthedData()
   }
 
   // Connection Setup Page
@@ -689,7 +793,17 @@ export default function App() {
                   {driveStatus.drives.map((d) => (
                     <div className="drive-status-item" key={d.drive}>
                       <div>
-                        <div className="drive-status-title">{d.drive}</div>
+                        <div className="drive-status-title">
+                          {(() => {
+                            const activeJob = jobs.find((j) => j.drive === d.drive && isJobActive(j.state))
+                            return (
+                              <>
+                                {d.drive}
+                                {activeJob && <span className="disc-spinner" title={`${activeJob.state} in progress`} />}
+                              </>
+                            )
+                          })()}
+                        </div>
                         <div className="drive-status-meta">{d.detail}</div>
                       </div>
                       <div className="drive-status-actions">
@@ -744,7 +858,32 @@ export default function App() {
                         {job.state}
                       </span>
                     </div>
+                    <div className="job-progress-wrap">
+                      <div className="job-progress-bar">
+                        <div className="job-progress-fill" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress || 0)))}%` }} />
+                      </div>
+                      <div className="job-progress-label">{Math.max(0, Math.min(100, Number(job.progress || 0)))}%</div>
+                    </div>
                     {job.error && <div className="job-error">⚠️ {job.error}</div>}
+                    {Array.isArray(job.logs) && job.logs.length > 0 && (
+                      <div className="job-log-box">
+                        {job.logs.slice(-80).map((line, idx) => (
+                          <div key={`${job.id}-log-${idx}`} className="job-log-line">{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="inline-actions" style={{ marginTop: '8px' }}>
+                      {isJobActive(job.state) && (
+                        <button className="btn-secondary" onClick={() => cancelJob(job.id)}>
+                          Terminate Job
+                        </button>
+                      )}
+                      {job.output_path && (
+                        <button className="btn-secondary" onClick={() => cleanupJobOutput(job.id)}>
+                          Cleanup Output
+                        </button>
+                      )}
+                    </div>
                     {job.state === 'identifying' && (
                       <button
                         className="btn-secondary"
@@ -835,6 +974,55 @@ export default function App() {
                       <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
                         Eject
                       </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>🛠️ Post-Rip Pipeline</h2>
+            <div className="form-group">
+              <label>Scope</label>
+              <select value={maintenanceScope} onChange={(e) => setMaintenanceScope(e.target.value)}>
+                <option value="all">all (movies + tv)</option>
+                <option value="movies">movies only</option>
+                <option value="tv">tv only</option>
+              </select>
+            </div>
+            <div className="inline-actions">
+              <button className="btn-secondary" onClick={runEncodeLibrary}>Queue Encode Library</button>
+              <button className="btn-secondary" onClick={runRenameLibrary}>Queue Rename Library</button>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Tasks</button>
+            </div>
+
+            {maintenanceTasks.length === 0 ? (
+              <p className="empty-state">No maintenance tasks yet.</p>
+            ) : (
+              <div className="jobs-list" style={{ marginTop: '12px' }}>
+                {maintenanceTasks.slice(0, 10).map((task) => (
+                  <div key={task.id} className="job-item">
+                    <div className="job-header">
+                      <span className="job-drive">{task.kind}</span>
+                      <span className="job-title">{task.id}</span>
+                      <span className="job-state" style={{ backgroundColor: jobStateColor(task.state === 'running' ? 'ripping' : task.state === 'complete' ? 'complete' : task.state === 'failed' ? 'failed' : 'pending') }}>
+                        {task.state}
+                      </span>
+                    </div>
+                    {Array.isArray(task.logs) && task.logs.length > 0 && (
+                      <div className="job-log-box">
+                        {task.logs.slice(-80).map((line, idx) => (
+                          <div key={`${task.id}-line-${idx}`} className="job-log-line">{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="inline-actions" style={{ marginTop: '8px' }}>
+                      {(task.state === 'queued' || task.state === 'running') && (
+                        <button className="btn-secondary" onClick={() => cancelMaintenanceTask(task.id)}>
+                          Terminate Task
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -992,6 +1180,39 @@ export default function App() {
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className="card">
+            <h2>🧪 Temp Rip Folder ({tempFiles.summary?.count || 0} items)</h2>
+            <div className="info-list" style={{ marginBottom: '12px' }}>
+              <div className="info-item">
+                <span className="label">Path</span>
+                <span className="value">{tempFiles.root || 'n/a'}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">Files</span>
+                <span className="value">{tempFiles.summary?.file_count || 0}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">Total Size</span>
+                <span className="value">{formatBytes(tempFiles.summary?.total_bytes || 0)}</span>
+              </div>
+            </div>
+            <div className="inline-actions" style={{ marginBottom: '12px' }}>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Temp</button>
+              <button className="btn-secondary" onClick={clearTempFolder}>Clear Temp Folder</button>
+            </div>
+            {tempFiles.entries.length === 0 ? (
+              <p className="empty-state">No temp files found.</p>
+            ) : (
+              <div className="file-list">
+                {tempFiles.entries.slice(0, 200).map((entry, i) => (
+                  <div key={`${entry.path}-${i}`} className="file-item">
+                    {entry.is_dir ? '[dir] ' : ''}{entry.path}{!entry.is_dir ? ` (${formatBytes(entry.size)})` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
