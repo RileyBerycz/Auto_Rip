@@ -17,9 +17,10 @@ RUN set -eux; \
             libc6-dev \
             libssl-dev \
             libexpat1-dev \
+            libavcodec-dev \
             zlib1g-dev; \
         MKV_VER=""; OSS_TGZ=""; BIN_TGZ=""; \
-        for v in 1.18.1 1.18.0 1.17.9 1.17.8 1.17.7; do \
+        for v in 1.18.3 1.18.2 1.18.1 1.18.0 1.17.9 1.17.8 1.17.7; do \
             OSS_TGZ="/tmp/makemkv-oss-${v}.tar.gz"; \
             BIN_TGZ="/tmp/makemkv-bin-${v}.tar.gz"; \
             if curl -fSL "https://www.makemkv.com/download/makemkv-oss-${v}.tar.gz" -o "${OSS_TGZ}" \
@@ -49,6 +50,7 @@ RUN set -eux; \
             libc6-dev \
             libssl-dev \
             libexpat1-dev \
+            libavcodec-dev \
             zlib1g-dev; \
         command -v makemkvcon >/dev/null; \
         rm -rf /var/lib/apt/lists/*
