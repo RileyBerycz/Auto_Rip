@@ -24,6 +24,7 @@ export default function App() {
 
   const [setupStatus, setSetupStatus] = useState(null)
   const [setupError, setSetupError] = useState('')
+  const [detectedDrives, setDetectedDrives] = useState([])
   const [token, setToken] = useState(localStorage.getItem('dvdflix_token') || '')
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState('') // 'success', 'error', 'info'
@@ -36,7 +37,7 @@ export default function App() {
       MOVIES_PATH: '/media/movies',
       TV_PATH: '/media/tvshows',
       TEMP_RIP_PATH: '/media/tmp',
-      DRIVES: '/dev/sr0,/dev/sr1,/dev/sr2',
+      DRIVES: '',
       TMDB_API_KEY: '',
       OMDB_API_KEY: '',
       TVDB_API_KEY: '',
@@ -104,6 +105,7 @@ export default function App() {
       const data = await resp.json()
       setSetupStatus(data)
       setSetupError('')
+      setDetectedDrives(data?.detected_drives || [])
       if (data?.settings && !settingsDraft) {
         setSettingsDraft(data.settings)
       }
@@ -201,6 +203,23 @@ export default function App() {
     setToken(data.token)
     showMessage('Setup complete', 'success')
     await refreshSetupStatus()
+  }
+
+  const detectDrives = async () => {
+    try {
+      const resp = await fetch(`${apiUrl}/api/setup/detected-drives`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      const drives = data?.drives || []
+      setDetectedDrives(drives)
+      if (drives.length === 0) {
+        showMessage('No drives detected inside container. Check Docker device mapping.', 'info')
+      } else {
+        showMessage(`Detected ${drives.length} drive(s)`, 'success')
+      }
+    } catch (err) {
+      showMessage(`Drive detection failed: ${err.message}`, 'error')
+    }
   }
 
   const saveSettings = async () => {
@@ -375,6 +394,34 @@ export default function App() {
               <div className="form-group">
                 <label>Drives</label>
                 <input value={setupForm.settings.DRIVES} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, DRIVES: e.target.value } })} />
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={detectDrives}
+                  >
+                    Detect Drives
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() =>
+                      setSetupForm({
+                        ...setupForm,
+                        settings: {
+                          ...setupForm.settings,
+                          DRIVES: detectedDrives.join(','),
+                        },
+                      })
+                    }
+                    disabled={detectedDrives.length === 0}
+                  >
+                    Use Detected
+                  </button>
+                </div>
+                <small className="field-help">
+                  Leave blank to auto-detect `/dev/sr*` drives. Detected now: {detectedDrives.length ? detectedDrives.join(', ') : 'none'}
+                </small>
               </div>
             </div>
 

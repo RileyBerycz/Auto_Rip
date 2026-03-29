@@ -41,6 +41,8 @@ docker compose -f docker-compose.yml -f docker-compose.ripper.yml up -d
 
 In Dockge, include both files in the stack and set host path envs such as `HOST_MOVIES_PATH`, `HOST_TV_PATH`, and drive envs (`DRIVE_0..2`, `DRIVES`).
 
+Tip: if `DRIVES` is left blank in setup/settings, the backend now auto-detects optical devices from `/dev/sr*` (and common aliases `/dev/cdrom`, `/dev/dvd`) that are visible inside the container.
+
 ## One-File Full Auto-Ripper (Dedicated Ripper Hosts)
 
 If this machine is dedicated to ripping, use `docker-compose.full.yml` for a single-file deployment:

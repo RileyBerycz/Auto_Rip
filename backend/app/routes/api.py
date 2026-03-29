@@ -6,6 +6,8 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
+from dvdflix_core.config import discover_optical_drives
+
 api_bp = Blueprint("api", __name__)
 
 
@@ -119,16 +121,24 @@ def setup_status() -> tuple:
     store = _store()
     configured = store.is_setup_complete()
     manager = _manager()
+    detected_drives = discover_optical_drives()
     return (
         jsonify(
             {
                 "ok": True,
                 "configured": configured,
                 "settings": manager.settings.to_runtime_dict(),
+                "detected_drives": detected_drives,
             }
         ),
         200,
     )
+
+
+@api_bp.get("/setup/detected-drives")
+def setup_detected_drives() -> tuple:
+    drives = discover_optical_drives()
+    return jsonify({"ok": True, "drives": drives, "csv": ",".join(drives)}), 200
 
 
 @api_bp.post("/setup/initialize")

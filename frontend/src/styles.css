@@ -317,6 +317,17 @@ button {
   gap: 8px;
 }
 
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-help {
+  color: var(--ink-secondary);
+  font-size: 0.82rem;
+}
+
 .form-group label {
   font-size: 0.9rem;
   font-weight: 500;

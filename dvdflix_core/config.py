@@ -1,8 +1,32 @@
 from __future__ import annotations
 
 import os
+from glob import glob
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def discover_optical_drives() -> list[str]:
+    """Detect common Linux optical drive device nodes in stable order."""
+    candidates = set(glob("/dev/sr*"))
+    for alias in ("/dev/cdrom", "/dev/dvd"):
+        if Path(alias).exists():
+            candidates.add(alias)
+
+    ordered = sorted(candidates)
+    return [d for d in ordered if Path(d).exists()]
+
+
+def parse_drives(value: str | None) -> list[str]:
+    if value is None:
+        return discover_optical_drives() or ["/dev/sr0", "/dev/sr1", "/dev/sr2"]
+
+    parsed = [d.strip() for d in value.split(",") if d.strip()]
+    if parsed:
+        return parsed
+
+    # Blank value in env or UI means "auto-detect".
+    return discover_optical_drives()
 
 
 @dataclass(slots=True)
@@ -11,7 +35,7 @@ class Settings:
     tv_path: Path = Path(os.getenv("TV_PATH", "/media/dvdflix/tvshows"))
     temp_rip_path: Path = Path(os.getenv("TEMP_RIP_PATH", "/media/dvdflix/tmp"))
     drives: list[str] = field(
-        default_factory=lambda: [d.strip() for d in os.getenv("DRIVES", "/dev/sr0,/dev/sr1,/dev/sr2").split(",") if d.strip()]
+        default_factory=lambda: parse_drives(os.getenv("DRIVES"))
     )
     tmdb_api_key: str = os.getenv("TMDB_API_KEY", "")
     ollama_url: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -57,7 +81,7 @@ class Settings:
 
         drives = overrides.get("DRIVES")
         if drives is not None:
-            settings.drives = [d.strip() for d in drives.split(",") if d.strip()]
+            settings.drives = parse_drives(drives)
 
         if overrides.get("TMDB_API_KEY") is not None:
             settings.tmdb_api_key = overrides.get("TMDB_API_KEY", "")
