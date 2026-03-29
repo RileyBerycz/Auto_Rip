@@ -690,7 +690,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
 
     {/* Manual Title Override Modal */}
     {overrideModal && (
