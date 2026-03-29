@@ -688,6 +688,240 @@ button {
   margin: 0;
 }
 
+.drive-shell {
+  background:
+    radial-gradient(circle at 10% 10%, rgba(72, 201, 134, 0.08), transparent 35%),
+    radial-gradient(circle at 90% 90%, rgba(59, 130, 246, 0.1), transparent 40%),
+    var(--card);
+}
+
+.drive-shell-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.drive-shell-header h2 {
+  margin-bottom: 4px;
+}
+
+.drive-shell-subtitle {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 0.88rem;
+}
+
+.drive-summary-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.drive-summary-pill {
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.pill-label {
+  color: var(--ink-secondary);
+  font-size: 0.82rem;
+}
+
+.pill-value {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.drive-grid-upgraded {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: stretch;
+}
+
+.drive-card-upgraded {
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(165deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.02));
+  display: grid;
+  gap: 10px;
+}
+
+.drive-card-upgraded.tone-ok {
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.3);
+}
+
+.drive-card-upgraded.tone-warn {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.3);
+}
+
+.drive-card-upgraded.tone-bad {
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.3);
+}
+
+.drive-card-upgraded.tone-info {
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+.drive-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.drive-name {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.drive-visual-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.drive-disc-visual {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  position: relative;
+  margin: 0 auto;
+  display: block;
+  background: radial-gradient(circle at 35% 35%, #e5edf5 0%, #a4b6c6 22%, #6f8190 58%, #40505d 100%);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28);
+}
+
+.drive-disc-visual.no-disc {
+  filter: grayscale(0.95) brightness(0.7);
+  opacity: 0.5;
+}
+
+.drive-disc-visual.has-disc {
+  opacity: 1;
+}
+
+.drive-disc-visual.is-active {
+  animation: spinDisc 1.1s linear infinite;
+}
+
+.disc-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+}
+
+.disc-ring.outer {
+  inset: 9px;
+}
+
+.disc-ring.middle {
+  inset: 22px;
+}
+
+.disc-ring.inner {
+  inset: 34px;
+}
+
+.disc-core {
+  position: absolute;
+  inset: 37px;
+  border-radius: 50%;
+  background: #202c35;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22);
+}
+
+.drive-quick-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.drive-meta-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.drive-meta-line span {
+  color: var(--ink-secondary);
+  font-size: 0.8rem;
+}
+
+.drive-meta-line strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+  text-transform: capitalize;
+}
+
+.drive-detail-line {
+  margin-top: 0;
+}
+
+.drive-active-job {
+  display: grid;
+  gap: 8px;
+}
+
+.drive-job-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drive-job-state {
+  text-transform: capitalize;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.drive-job-progress {
+  color: var(--ink-secondary);
+  font-size: 0.8rem;
+}
+
+.drive-last-job {
+  border: 1px dashed var(--card-border);
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.drive-last-job-label {
+  color: var(--ink-secondary);
+  font-size: 0.78rem;
+}
+
+.drive-last-job-value {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.drive-last-job-time {
+  color: var(--ink-secondary);
+  font-size: 0.76rem;
+}
+
+.drive-actions-row {
+  margin-top: 4px;
+}
+
 /* File List */
 .file-list {
   display: grid;
@@ -996,6 +1230,28 @@ button {
     justify-content: flex-start;
     flex-wrap: wrap;
   }
+
+  .drive-shell-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .drive-summary-band {
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+  }
+
+  .drive-visual-row {
+    grid-template-columns: 76px 1fr;
+  }
+
+  .drive-disc-visual {
+    width: 72px;
+    height: 72px;
+  }
+
+  .disc-core {
+    inset: 31px;
+  }
 }
 
 @media (max-width: 512px) {
@@ -1017,6 +1273,23 @@ button {
 
   .content {
     padding: 16px 12px;
+  }
+
+  .drive-summary-band {
+    grid-template-columns: 1fr;
+  }
+
+  .drive-grid-upgraded {
+    grid-template-columns: 1fr;
+  }
+
+  .drive-visual-row {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .drive-quick-meta {
+    width: 100%;
   }
 
   .card {

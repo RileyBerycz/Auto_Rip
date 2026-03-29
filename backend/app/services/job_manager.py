@@ -12,6 +12,7 @@ from flask_socketio import SocketIO
 from dvdflix_core import JobState, RipPipeline, Settings
 from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.models import RipJob
+from dvdflix_core.ripper import eject_drive
 
 
 def _canonical_drive_key(drive: str) -> str:
@@ -111,8 +112,10 @@ class JobManager:
         self.inflight_job_by_drive: dict[str, str] = {}
         self.cancel_flags: dict[str, threading.Event] = {}
         self.wait_media_change: set[str] = set()
+        self.last_auto_eject_attempt: dict[str, float] = {}
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
+        self.auto_eject_cooldown_seconds = 90
 
         # Background monitor allows hands-off operation in the web app.
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -260,7 +263,7 @@ class JobManager:
     def start_all(self) -> dict:
         result: dict[str, dict] = {}
         seen: set[str] = set()
-        for drive in self.settings.drives:
+        for drive in self._combined_drives():
             normalized = _preferred_display_drive(drive)
             key = _canonical_drive_key(normalized)
             if key in seen:
@@ -268,6 +271,46 @@ class JobManager:
             seen.add(key)
             result[normalized] = self.start_job(normalized)
         return {"ok": True, "result": result}
+
+    def _combined_drives(self) -> list[str]:
+        configured = [_preferred_display_drive(d) for d in self.settings.drives]
+        detected = discover_optical_drives()
+
+        merged = configured + [d for d in detected if _preferred_display_drive(d) not in configured]
+        seen: set[str] = set()
+        unique: list[str] = []
+        for drive in merged:
+            key = _canonical_drive_key(drive)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(drive)
+        return unique
+
+    def _maybe_auto_eject_empty(self, drive: str) -> None:
+        now = time.time()
+        drive_key = _canonical_drive_key(drive)
+        with self.lock:
+            last = self.last_auto_eject_attempt.get(drive_key, 0.0)
+            if now - last < self.auto_eject_cooldown_seconds:
+                return
+            self.last_auto_eject_attempt[drive_key] = now
+
+        ok, _ = eject_drive(drive)
+        if not ok:
+            return
+
+        with self.lock:
+            job_id = self.inflight_job_by_drive.get(drive_key)
+            if not job_id:
+                return
+            job = self.jobs.get(job_id)
+            if not job:
+                return
+            self._append_job_log(job, "Auto-eject triggered: tray appears empty")
+            job.updated_at = datetime.utcnow()
+            payload = job.to_dict()
+        self._emit("job_update", payload)
 
     def _run_pipeline_job(self, drive: str) -> None:
         drive = _preferred_display_drive(drive)
@@ -327,16 +370,26 @@ class JobManager:
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
             seen: set[str] = set()
-            for configured in self.settings.drives:
+            for configured in self._combined_drives():
                 drive = _preferred_display_drive(configured)
                 drive_key = _canonical_drive_key(drive)
                 if drive_key in seen:
                     continue
                 seen.add(drive_key)
 
-                if not has_disc(drive):
+                status = probe_drive_status(drive)
+                if status.get("status") == "empty":
+                    self._maybe_auto_eject_empty(drive)
                     with self.lock:
                         self.wait_media_change.discard(drive_key)
+                    continue
+
+                if not status.get("has_disc"):
+                    with self.lock:
+                        self.wait_media_change.discard(drive_key)
+                    continue
+
+                if not status.get("readable"):
                     continue
 
                 with self.lock:

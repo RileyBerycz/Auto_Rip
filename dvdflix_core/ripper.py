@@ -27,8 +27,10 @@ def run_makemkv(
     should_cancel: Callable[[], bool] | None = None,
     log_cb: Callable[[str], None] | None = None,
 ) -> tuple[bool, str, bool]:
-    # Use `all` to avoid lsdvd 1-based vs makemkv 0-based title index mismatch.
-    cmd = [makemkvcon_path, "mkv", "all", drive, str(output_dir)]
+    # makemkvcon syntax is: mkv <source> <title|all> <destination>.
+    # Use explicit dev:/ path so each worker targets its intended optical drive.
+    source = drive if drive.startswith("dev:") else f"dev:{drive}"
+    cmd = [makemkvcon_path, "mkv", source, "all", str(output_dir)]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

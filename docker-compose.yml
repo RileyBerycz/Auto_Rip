@@ -4,6 +4,9 @@ services:
     pull_policy: always
     command: ["python", "-m", "backend.run"]
     privileged: true
+    device_cgroup_rules:
+      - "b 11:* rmw"
+      - "c 21:* rmw"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

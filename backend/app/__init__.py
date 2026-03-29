@@ -24,11 +24,20 @@ def create_app() -> Flask:
         "TEMP_RIP_PATH",
         "DRIVES",
         "TMDB_API_KEY",
+        "OMDB_API_KEY",
+        "TVDB_API_KEY",
+        "TVDB_PIN",
         "OLLAMA_URL",
         "OLLAMA_MODEL",
         "RUNTIME_TOLERANCE_MINUTES",
+        "IDENTIFY_MIN_CONFIDENCE",
         "MAX_IDENTIFY_WORKERS",
         "DISC_CACHE_DB",
+        "OPENSUBTITLES_API_KEY",
+        "ENABLE_WEB_SEARCH",
+        "SEARXNG_URL",
+        "HANDBRAKE_PRESET",
+        "MAKEMKVCON_PATH",
     ]
     saved = store.get_settings(settings_keys)
 

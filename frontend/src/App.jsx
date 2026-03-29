@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 
 const envApiUrl = import.meta.env.VITE_API_URL || ''
 const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
+const AUTO_REFRESH_MS = 8000
+const SETUP_REFRESH_MS = 12000
 
 const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'history', 'accounts']
 
@@ -90,6 +92,8 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [historyEditModal, setHistoryEditModal] = useState(null)
+  const authedRefreshInFlight = useRef(false)
+  const setupRefreshInFlight = useRef(false)
 
   const effectiveSocketUrl = socketUrl || apiUrl
   const socket = useMemo(() => io(effectiveSocketUrl, { autoConnect: false, transports: ['websocket', 'polling'] }), [effectiveSocketUrl])
@@ -107,8 +111,11 @@ export default function App() {
   }
 
   const refreshSetupStatus = async () => {
+    if (setupRefreshInFlight.current) return
+    setupRefreshInFlight.current = true
     if (!apiUrl) {
       showMessage('Backend URL is required', 'error')
+      setupRefreshInFlight.current = false
       return
     }
     try {
@@ -123,58 +130,69 @@ export default function App() {
       }
     } catch (err) {
       setSetupError(`Cannot reach ${apiUrl}: ${err.message}`)
+    } finally {
+      setupRefreshInFlight.current = false
     }
   }
 
   const fetchAuthedData = async () => {
-    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes, tempRes, maintenanceRes] = await Promise.all([
-      fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/capabilities`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/settings`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/drives/status`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/temp-files`, { headers: authHeaders }),
-      fetch(`${apiUrl}/api/maintenance/tasks`, { headers: authHeaders }),
-    ])
+    if (!token || !apiUrl) return
+    if (authedRefreshInFlight.current) return
+    authedRefreshInFlight.current = true
+    try {
+      const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes, tempRes, maintenanceRes] = await Promise.all([
+        fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/capabilities`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/settings`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/drives/status`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/temp-files`, { headers: authHeaders }),
+        fetch(`${apiUrl}/api/maintenance/tasks`, { headers: authHeaders }),
+      ])
 
-    if (healthRes.status === 401) {
-      setToken('')
-      localStorage.removeItem('dvdflix_token')
-      return
+      if (healthRes.status === 401) {
+        setToken('')
+        localStorage.removeItem('dvdflix_token')
+        return
+      }
+
+      setHealth(await healthRes.json())
+      setJobs((await jobsRes.json()).jobs || [])
+      setLibrary(await libraryRes.json())
+      setCapabilities(await capRes.json())
+      const drivesData = await drivesRes.json().catch(() => ({ drives: [], summary: null }))
+      setDriveStatus({ drives: drivesData?.drives || [], summary: drivesData?.summary || null })
+      const tempData = await tempRes.json().catch(() => ({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } }))
+      setTempFiles({
+        root: tempData?.root || '',
+        exists: !!tempData?.exists,
+        entries: tempData?.entries || [],
+        summary: tempData?.summary || { count: 0, file_count: 0, total_bytes: 0 },
+      })
+      const maintenanceData = await maintenanceRes.json().catch(() => ({ tasks: [] }))
+      setMaintenanceTasks(maintenanceData?.tasks || [])
+
+      const settingsData = await settingsRes.json()
+      if (settingsData?.settings) setSettingsDraft(settingsData.settings)
+
+      const profileData = await profileRes.json()
+      if (profileData?.profile) setProfileDraft(profileData.profile)
+
+      const historyData = await historyRes.json()
+      setHistory(historyData?.history || [])
+
+      const accountsData = await accountsRes.json()
+      setAccounts(accountsData?.users || [])
+      setCurrentUser(accountsData?.current_user || null)
+    } catch {
+      // Background polling should be resilient; manual actions surface explicit errors.
+    } finally {
+      authedRefreshInFlight.current = false
     }
-
-    setHealth(await healthRes.json())
-    setJobs((await jobsRes.json()).jobs || [])
-    setLibrary(await libraryRes.json())
-    setCapabilities(await capRes.json())
-    const drivesData = await drivesRes.json().catch(() => ({ drives: [], summary: null }))
-    setDriveStatus({ drives: drivesData?.drives || [], summary: drivesData?.summary || null })
-    const tempData = await tempRes.json().catch(() => ({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } }))
-    setTempFiles({
-      root: tempData?.root || '',
-      exists: !!tempData?.exists,
-      entries: tempData?.entries || [],
-      summary: tempData?.summary || { count: 0, file_count: 0, total_bytes: 0 },
-    })
-    const maintenanceData = await maintenanceRes.json().catch(() => ({ tasks: [] }))
-    setMaintenanceTasks(maintenanceData?.tasks || [])
-
-    const settingsData = await settingsRes.json()
-    if (settingsData?.settings) setSettingsDraft(settingsData.settings)
-
-    const profileData = await profileRes.json()
-    if (profileData?.profile) setProfileDraft(profileData.profile)
-
-    const historyData = await historyRes.json()
-    setHistory(historyData?.history || [])
-
-    const accountsData = await accountsRes.json()
-    setAccounts(accountsData?.users || [])
-    setCurrentUser(accountsData?.current_user || null)
   }
 
   useEffect(() => {
@@ -193,6 +211,22 @@ export default function App() {
     })
     return () => socket.disconnect()
   }, [socket, token, effectiveSocketUrl])
+
+  useEffect(() => {
+    if (!apiUrl || token) return
+    const timer = setInterval(() => {
+      refreshSetupStatus()
+    }, SETUP_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [apiUrl, token])
+
+  useEffect(() => {
+    if (!token || !apiUrl) return
+    const timer = setInterval(() => {
+      fetchAuthedData()
+    }, AUTO_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [token, apiUrl])
 
   const applyBackendUrls = () => {
     const nextApi = (apiUrlInput || '').trim().replace(/\/$/, '')
@@ -463,6 +497,20 @@ export default function App() {
   }
 
   const isJobActive = (state) => ['pending', 'identifying', 'ripping', 'encoding', 'postprocessing'].includes(state)
+
+  const driveStatusTone = (status) => {
+    if (status === 'ready' || status === 'encrypted') return 'ok'
+    if (status === 'empty') return 'warn'
+    if (status === 'missing' || status === 'error' || status === 'tool-missing') return 'bad'
+    return 'info'
+  }
+
+  const formatTimestamp = (value) => {
+    if (!value) return 'n/a'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString()
+  }
 
   const cancelJob = async (jobId) => {
     const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/cancel`, {
@@ -896,43 +944,90 @@ export default function App() {
 
       {activePage === 'drives' && (
         <div className="content">
-          <div className="card">
-            <h2>💿 Drive Control Center</h2>
-            <div className="inline-actions" style={{ marginBottom: '12px' }}>
+          <div className="card drive-shell">
+            <div className="drive-shell-header">
+              <div>
+                <h2>Optical Drive Bay</h2>
+                <p className="drive-shell-subtitle">Live tray state, rip activity, and control actions for each mounted optical device.</p>
+              </div>
               <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Drives</button>
             </div>
+
+            <div className="drive-summary-band">
+              <div className="drive-summary-pill">
+                <span className="pill-label">Total</span>
+                <span className="pill-value">{driveStatus?.summary?.total ?? driveStatus.drives.length}</span>
+              </div>
+              <div className="drive-summary-pill">
+                <span className="pill-label">With Disc</span>
+                <span className="pill-value">{driveStatus?.summary?.with_disc ?? 0}</span>
+              </div>
+              <div className="drive-summary-pill">
+                <span className="pill-label">Readable</span>
+                <span className="pill-value">{driveStatus?.summary?.readable ?? 0}</span>
+              </div>
+              <div className="drive-summary-pill">
+                <span className="pill-label">Empty</span>
+                <span className="pill-value">{driveStatus?.summary?.empty ?? 0}</span>
+              </div>
+            </div>
+
             {driveStatus.drives.length === 0 ? (
               <p className="empty-state">No drives detected.</p>
             ) : (
-              <div className="drive-grid">
+              <div className="drive-grid drive-grid-upgraded">
                 {driveStatus.drives.map((d) => {
-                  const activeJob = jobs.find((j) => j.drive === d.drive && isJobActive(j.state))
+                  const driveJobs = jobs.filter((j) => j.drive === d.drive)
+                  const activeJob = driveJobs.find((j) => isJobActive(j.state))
+                  const latestJob = driveJobs[0]
                   const latestLog = Array.isArray(activeJob?.logs) && activeJob.logs.length > 0 ? activeJob.logs[activeJob.logs.length - 1] : ''
+                  const progress = Math.max(0, Math.min(100, Number(activeJob?.progress || 0)))
+                  const tone = driveStatusTone(d.status)
+
                   return (
-                    <div key={`drive-card-${d.drive}`} className="card drive-card">
-                      <div className="drive-card-header">
-                        <h3>{d.drive}</h3>
-                        {activeJob && <span className="disc-spinner" title={`${activeJob.state} in progress`} />}
+                    <div key={`drive-card-${d.drive}`} className={`drive-card-upgraded tone-${tone}`}>
+                      <div className="drive-card-topline">
+                        <span className="drive-name">{d.drive}</span>
+                        <span className={`badge ${tone}`}>{d.status}</span>
                       </div>
-                      <div className="info-list">
-                        <div className="info-item"><span className="label">State</span><span className="value">{d.status}</span></div>
-                        <div className="info-item"><span className="label">Has Disc</span><span className="value">{d.has_disc ? 'yes' : 'no'}</span></div>
-                        <div className="info-item"><span className="label">Readable</span><span className="value">{d.readable ? 'yes' : 'no'}</span></div>
-                        <div className="info-item"><span className="label">Source</span><span className="value">{d.source || 'n/a'}</span></div>
+
+                      <div className="drive-visual-row">
+                        <div className={`drive-disc-visual ${d.has_disc ? 'has-disc' : 'no-disc'} ${activeJob ? 'is-active' : ''}`} title={activeJob ? `${activeJob.state} in progress` : 'idle'}>
+                          <span className="disc-ring outer" />
+                          <span className="disc-ring middle" />
+                          <span className="disc-ring inner" />
+                          <span className="disc-core" />
+                        </div>
+                        <div className="drive-quick-meta">
+                          <div className="drive-meta-line"><span>Disc</span><strong>{d.has_disc ? 'Loaded' : 'Empty'}</strong></div>
+                          <div className="drive-meta-line"><span>Readable</span><strong>{d.readable ? 'Yes' : 'No'}</strong></div>
+                          <div className="drive-meta-line"><span>Source</span><strong>{d.source || 'n/a'}</strong></div>
+                          <div className="drive-meta-line"><span>Device</span><strong>{d.exists ? 'Present' : 'Missing'}</strong></div>
+                        </div>
                       </div>
-                      <div className="job-stage-line">{d.detail}</div>
-                      {activeJob && (
-                        <>
-                          <div className="job-progress-wrap">
-                            <div className="job-progress-bar">
-                              <div className="job-progress-fill" style={{ width: `${Math.max(0, Math.min(100, Number(activeJob.progress || 0)))}%` }} />
-                            </div>
-                            <div className="job-progress-label">{Math.max(0, Math.min(100, Number(activeJob.progress || 0)))}%</div>
+
+                      <div className="job-stage-line drive-detail-line">{d.detail}</div>
+
+                      {activeJob ? (
+                        <div className="drive-active-job">
+                          <div className="drive-job-head">
+                            <span className="drive-job-state">{activeJob.state}</span>
+                            <span className="drive-job-progress">{progress}%</span>
                           </div>
-                          <div className="job-stage-line">{latestLog || activeJob.state}</div>
-                        </>
+                          <div className="job-progress-bar">
+                            <div className="job-progress-fill" style={{ width: `${progress}%` }} />
+                          </div>
+                          <div className="job-stage-line">{latestLog || activeJob.title || activeJob.disc_label || 'Working...'}</div>
+                        </div>
+                      ) : (
+                        <div className="drive-last-job">
+                          <span className="drive-last-job-label">Last Job</span>
+                          <span className="drive-last-job-value">{latestJob ? `${latestJob.state} • ${latestJob.title || latestJob.disc_label || 'Unknown'}` : 'No job yet'}</span>
+                          <span className="drive-last-job-time">{latestJob ? formatTimestamp(latestJob.updated_at) : 'n/a'}</span>
+                        </div>
                       )}
-                      <div className="inline-actions" style={{ marginTop: '10px' }}>
+
+                      <div className="inline-actions drive-actions-row">
                         <button className="btn-secondary" onClick={() => startDrive(d.drive)}>Start</button>
                         <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>Eject</button>
                         {activeJob && <button className="btn-secondary" onClick={() => cancelJob(activeJob.id)}>Terminate</button>}
