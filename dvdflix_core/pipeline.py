@@ -72,6 +72,9 @@ class RipPipeline:
             with self.identify_lock:
                 identified = self.identifier.identify(disc)
 
+            confidence_pct = int(round(float(identified.confidence or 0.0) * 100))
+            needs_manual_review = confidence_pct < int(self.settings.identify_min_confidence)
+
             job.title = identified.title
             job.media_type = identified.media_type
             job.state = JobState.ripping
@@ -80,17 +83,21 @@ class RipPipeline:
                 progress_cb(
                     JobState.ripping.value,
                     55,
-                    f"Identified as {identified.media_type}: {identified.title}",
+                    f"Identified as {identified.media_type}: {identified.title} ({confidence_pct}% confidence)",
                 )
 
             target_root: Path = self.settings.movies_path
             if identified.media_type == "tv":
                 target_root = self.settings.tv_path
 
-            output_dir = build_output_dir(target_root, identified.title, identified.year)
+            # Rip into temp first; only move to library after successful completion.
+            temp_title = f"{identified.title} [{job.id[:8]}]"
+            temp_output_dir = build_output_dir(self.settings.temp_rip_path, temp_title, identified.year)
+            if progress_cb:
+                progress_cb(JobState.ripping.value, 58, f"Ripping to temp path: {temp_output_dir}")
             ok, message, cancelled = run_makemkv(
                 drive,
-                output_dir,
+                temp_output_dir,
                 makemkvcon_path=self.settings.makemkvcon_path,
                 should_cancel=should_cancel,
                 log_cb=(lambda line: progress_cb(JobState.ripping.value, 70, line)) if progress_cb else None,
@@ -98,31 +105,52 @@ class RipPipeline:
             if cancelled:
                 job.state = JobState.canceled
                 job.error = message
-                shutil.rmtree(output_dir, ignore_errors=True)
+                shutil.rmtree(temp_output_dir, ignore_errors=True)
                 if progress_cb:
                     progress_cb(JobState.canceled.value, 100, "Cancelled; partial output cleaned")
             elif not ok:
                 job.state = JobState.failed
                 job.error = message
+                shutil.rmtree(temp_output_dir, ignore_errors=True)
                 if progress_cb:
                     progress_cb(JobState.failed.value, 100, f"Rip failed: {message}")
             else:
-                job.state = JobState.complete
-                job.output_path = str(output_dir)
-                job.progress = 100
-                total_seconds = int(sum(track.duration_minutes * 60 for track in disc.tracks))
-                disc_hash = self.cache.compute_disc_hash(disc.label, len(disc.tracks), total_seconds)
-                self.cache.record_disc_rip(
-                    disc_hash=disc_hash,
-                    disc_label=disc.label,
-                    title=identified.title,
-                    year=str(identified.year or ""),
-                    media_type=identified.media_type,
-                    drive=drive,
-                    output_path=str(output_dir),
-                )
-                if progress_cb:
-                    progress_cb(JobState.complete.value, 100, f"Rip complete: {output_dir}")
+                if needs_manual_review:
+                    job.state = JobState.needs_review
+                    job.output_path = str(temp_output_dir)
+                    job.progress = 100
+                    job.error = (
+                        f"Identification confidence {confidence_pct}% is below threshold "
+                        f"{self.settings.identify_min_confidence}%. Awaiting manual identification."
+                    )
+                    if progress_cb:
+                        progress_cb(
+                            JobState.needs_review.value,
+                            100,
+                            f"Rip complete to temp: {temp_output_dir}. Awaiting manual identification.",
+                        )
+                else:
+                    output_dir = build_output_dir(target_root, identified.title, identified.year)
+                    for child in temp_output_dir.iterdir():
+                        shutil.move(str(child), str(output_dir / child.name))
+                    shutil.rmtree(temp_output_dir, ignore_errors=True)
+
+                    job.state = JobState.complete
+                    job.output_path = str(output_dir)
+                    job.progress = 100
+                    total_seconds = int(sum(track.duration_minutes * 60 for track in disc.tracks))
+                    disc_hash = self.cache.compute_disc_hash(disc.label, len(disc.tracks), total_seconds)
+                    self.cache.record_disc_rip(
+                        disc_hash=disc_hash,
+                        disc_label=disc.label,
+                        title=identified.title,
+                        year=str(identified.year or ""),
+                        media_type=identified.media_type,
+                        drive=drive,
+                        output_path=str(output_dir),
+                    )
+                    if progress_cb:
+                        progress_cb(JobState.complete.value, 100, f"Rip complete: {output_dir}")
 
             job.updated_at = datetime.utcnow()
             return job

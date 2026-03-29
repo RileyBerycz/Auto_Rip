@@ -12,7 +12,7 @@ from flask_socketio import SocketIO
 from dvdflix_core import JobState, RipPipeline, Settings
 from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.models import RipJob
-from dvdflix_core.ripper import eject_drive
+from dvdflix_core.ripper import build_output_dir, eject_drive
 
 
 def _canonical_drive_key(drive: str) -> str:
@@ -165,6 +165,53 @@ class JobManager:
                 job.logs = [str(x) for x in updates.get("logs", [])]
             job.updated_at = datetime.utcnow()
             return True
+
+    def finalize_manual_identification(
+        self,
+        job_id: str,
+        *,
+        title: str,
+        media_type: str,
+        year: int | None,
+    ) -> dict:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return {"ok": False, "error": "job not found"}
+            source_path = Path((job.output_path or "").strip())
+
+        if not source_path.exists() or not source_path.is_dir():
+            return {"ok": False, "error": "temp rip output not found"}
+
+        target_root = self.settings.movies_path if media_type == "movie" else self.settings.tv_path
+        output_dir = build_output_dir(target_root, title, year)
+        try:
+            for child in source_path.iterdir():
+                child_target = output_dir / child.name
+                if child_target.exists():
+                    suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+                    child_target = output_dir / f"{child.stem}-{suffix}{child.suffix}"
+                child.rename(child_target)
+            source_path.rmdir()
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return {"ok": False, "error": "job not found"}
+            job.title = title
+            job.media_type = media_type
+            job.output_path = str(output_dir)
+            job.state = JobState.complete
+            job.error = ""
+            job.progress = 100
+            self._append_job_log(job, f"Manual identification applied; moved output to {output_dir}")
+            job.updated_at = datetime.utcnow()
+            payload = job.to_dict()
+
+        self._emit("job_update", payload)
+        return {"ok": True, "output_path": str(output_dir)}
 
     def _append_job_log(self, job: RipJob, message: str) -> None:
         ts = datetime.utcnow().strftime("%H:%M:%S")

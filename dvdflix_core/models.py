@@ -11,6 +11,7 @@ class JobState(str, Enum):
     ripping = "ripping"
     encoding = "encoding"
     postprocessing = "postprocessing"
+    needs_review = "needs_review"
     canceled = "canceled"
     complete = "complete"
     failed = "failed"

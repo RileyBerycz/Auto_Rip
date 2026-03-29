@@ -613,24 +613,31 @@ def override_job_title(job_id: str) -> tuple:
     payload = request.get_json(silent=True) or {}
     title = str(payload.get("title", "")).strip()
     year = str(payload.get("year", "")).strip()
-    media_type = str(payload.get("media_type", "movie")).strip()
+    media_type = str(payload.get("media_type", "movie")).strip().lower()
     
     if not title:
         return jsonify({"ok": False, "error": "title is required"}), 400
+    if media_type not in {"movie", "tv"}:
+        return jsonify({"ok": False, "error": "media_type must be movie or tv"}), 400
+
+    parsed_year: int | None = None
+    if year:
+        if not year.isdigit():
+            return jsonify({"ok": False, "error": "year must be numeric"}), 400
+        parsed_year = int(year)
     
     job = _manager().get_job(job_id)
     if not job:
         return jsonify({"ok": False, "error": "job not found"}), 404
     
-    # Update in-memory job metadata for active dashboard visibility.
-    _manager().update_job(
+    result = _manager().finalize_manual_identification(
         job_id,
-        {
-            "title": title,
-            "media_type": media_type,
-        },
+        title=title,
+        media_type=media_type,
+        year=parsed_year,
     )
-    return jsonify({"ok": True}), 200
+    code = 200 if result.get("ok") else 409
+    return jsonify(result), code
 
 
 @api_bp.post("/search/tmdb")

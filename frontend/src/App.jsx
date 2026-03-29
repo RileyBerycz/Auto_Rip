@@ -486,6 +486,7 @@ export default function App() {
     switch (state) {
       case 'complete': return '#10b981'
       case 'failed': return '#ef4444'
+      case 'needs_review': return '#f97316'
       case 'ripping': return '#f59e0b'
       case 'encoding': return '#8b5cf6'
       case 'postprocessing': return '#06b6d4'
@@ -926,12 +927,12 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    {job.state === 'identifying' && (
+                    {(job.state === 'identifying' || job.state === 'needs_review') && (
                       <button
                         className="btn-secondary"
                         onClick={() => setOverrideModal({ jobId: job.id, jobTitle: job.title || job.disc_label })}
                       >
-                        🔍 Search & Override
+                        🔍 Manual Identify & Move
                       </button>
                     )}
                   </div>

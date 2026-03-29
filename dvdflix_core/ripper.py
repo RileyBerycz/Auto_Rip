@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -65,10 +66,28 @@ def run_makemkv(
 
     rc = proc.wait()
     output = "\n".join(lines[-200:]).strip()
+
+    saved_titles: int | None = None
+    failed_titles: int | None = None
+    summary_re = re.compile(r"(\d+)\s+titles\s+saved,\s*(\d+)\s+failed", re.IGNORECASE)
+    for line in lines:
+        m = summary_re.search(line)
+        if not m:
+            continue
+        saved_titles = int(m.group(1))
+        failed_titles = int(m.group(2))
+
     if cancelled:
         return False, "Cancelled by user", True
     if rc != 0:
         return False, output or f"makemkvcon exited with code {rc}", False
+
+    if failed_titles is not None and failed_titles > 0:
+        msg = f"MakeMKV copy completed with errors: {saved_titles or 0} titles saved, {failed_titles} failed"
+        return False, f"{msg}\n{output}".strip(), False
+    if saved_titles is not None and saved_titles <= 0:
+        return False, f"MakeMKV did not save any titles\n{output}".strip(), False
+
     return True, output, False
 
 
