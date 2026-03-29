@@ -41,7 +41,10 @@ def scan_disc(drive: str) -> DiscInfo:
         if "no medium found" in lower:
             raise RuntimeError(f"No disc detected in {drive}")
         if "no css library available" in lower or "encrypted dvd support unavailable" in lower:
-            raise RuntimeError(f"Disc in {drive} is encrypted and lsdvd cannot read it (missing libdvdcss)")
+            # lsdvd cannot parse CSS-encrypted metadata, but makemkvcon can often still rip it.
+            # Return minimal metadata so the pipeline can continue.
+            safe_label = f"ENCRYPTED_{drive.replace('/', '_')}"
+            return DiscInfo(drive=drive, label=safe_label, tracks=[])
         raise RuntimeError(f"lsdvd failed for {drive}: {stderr or 'unknown error'}")
 
     raw = _extract_lsdvd_payload(proc.stdout)

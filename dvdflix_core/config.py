@@ -36,12 +36,24 @@ def discover_optical_drives() -> list[str]:
 
 
 def parse_drives(value: str | None) -> list[str]:
+    def _normalize(drives: list[str]) -> list[str]:
+        canonical_to_drive: dict[str, str] = {}
+        for drive in drives:
+            if not drive:
+                continue
+            key = _canonical_drive_key(drive)
+            current = canonical_to_drive.get(key)
+            # Prefer /dev/sr* over aliases for display and job identity.
+            if current is None or (not current.startswith("/dev/sr") and drive.startswith("/dev/sr")):
+                canonical_to_drive[key] = drive
+        return sorted(canonical_to_drive.values())
+
     if value is None:
         return discover_optical_drives() or ["/dev/sr0", "/dev/sr1", "/dev/sr2"]
 
     parsed = [d.strip() for d in value.split(",") if d.strip()]
     if parsed:
-        return parsed
+        return _normalize(parsed)
 
     # Blank value in env or UI means "auto-detect".
     return discover_optical_drives()

@@ -71,9 +71,9 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
                 "drive": drive,
                 "exists": True,
                 "has_disc": True,
-                "readable": False,
+                "readable": True,
                 "status": "encrypted",
-                "detail": "Encrypted disc present, lsdvd cannot read without libdvdcss",
+                "detail": "Encrypted disc detected; metadata is limited but rip via MakeMKV is allowed",
             }
 
         return {
@@ -110,6 +110,7 @@ class JobManager:
         self.inflight_by_drive: dict[str, Future] = {}
         self.inflight_job_by_drive: dict[str, str] = {}
         self.cancel_flags: dict[str, threading.Event] = {}
+        self.wait_media_change: set[str] = set()
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
 
@@ -190,8 +191,10 @@ class JobManager:
         )
 
     def start_job(self, drive: str) -> dict:
+        drive = _preferred_display_drive(drive)
+        drive_key = _canonical_drive_key(drive)
         with self.lock:
-            active = self.inflight_by_drive.get(drive)
+            active = self.inflight_by_drive.get(drive_key)
             if active and not active.done():
                 return {"ok": False, "error": f"Drive {drive} already busy"}
 
@@ -203,7 +206,7 @@ class JobManager:
 
         with self.lock:
             future = self.executor.submit(self._run_pipeline_job, drive)
-            self.inflight_by_drive[drive] = future
+            self.inflight_by_drive[drive_key] = future
             return {"ok": True}
 
     def cancel_job(self, job_id: str) -> dict:
@@ -256,11 +259,19 @@ class JobManager:
 
     def start_all(self) -> dict:
         result: dict[str, dict] = {}
+        seen: set[str] = set()
         for drive in self.settings.drives:
-            result[drive] = self.start_job(drive)
+            normalized = _preferred_display_drive(drive)
+            key = _canonical_drive_key(normalized)
+            if key in seen:
+                continue
+            seen.add(key)
+            result[normalized] = self.start_job(normalized)
         return {"ok": True, "result": result}
 
     def _run_pipeline_job(self, drive: str) -> None:
+        drive = _preferred_display_drive(drive)
+        drive_key = _canonical_drive_key(drive)
         safe_drive = drive.replace("/", "_")
         pending = RipJob(id=f"job-{int(time.time() * 1000)}-{safe_drive}", drive=drive, state=JobState.pending)
         pending.progress = 5
@@ -269,7 +280,7 @@ class JobManager:
         with self.lock:
             self.jobs[pending.id] = pending
             self.cancel_flags[pending.id] = cancel_event
-            self.inflight_job_by_drive[drive] = pending.id
+            self.inflight_job_by_drive[drive_key] = pending.id
         self._emit("job_update", pending.to_dict())
 
         def _on_progress(state: str, progress: int, message: str) -> None:
@@ -305,21 +316,34 @@ class JobManager:
         job.updated_at = datetime.utcnow()
         with self.lock:
             self.jobs[job.id] = job
-            self.inflight_by_drive.pop(drive, None)
-            self.inflight_job_by_drive.pop(drive, None)
+            self.inflight_by_drive.pop(drive_key, None)
+            self.inflight_job_by_drive.pop(drive_key, None)
             self.cancel_flags.pop(job.id, None)
+            # Avoid instant retry loops; require disc/tray change before auto requeue.
+            self.wait_media_change.add(drive_key)
 
         self._emit("job_update", job.to_dict())
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
-            for drive in self.settings.drives:
+            seen: set[str] = set()
+            for configured in self.settings.drives:
+                drive = _preferred_display_drive(configured)
+                drive_key = _canonical_drive_key(drive)
+                if drive_key in seen:
+                    continue
+                seen.add(drive_key)
+
                 if not has_disc(drive):
+                    with self.lock:
+                        self.wait_media_change.discard(drive_key)
                     continue
 
                 with self.lock:
-                    active = self.inflight_by_drive.get(drive)
+                    active = self.inflight_by_drive.get(drive_key)
                     if active and not active.done():
+                        continue
+                    if drive_key in self.wait_media_change:
                         continue
 
                 self.start_job(drive)

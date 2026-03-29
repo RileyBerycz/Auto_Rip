@@ -815,45 +815,6 @@ export default function App() {
             </div>
 
             <div className="card">
-              <h2>💿 Drive Bays</h2>
-              <div className="inline-actions" style={{ marginBottom: '10px' }}>
-                <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Drive Status</button>
-              </div>
-              {driveStatus.drives.length === 0 ? (
-                <p className="empty-state">No drives detected</p>
-              ) : (
-                <div className="drive-status-list">
-                  {driveStatus.drives.map((d) => (
-                    <div className="drive-status-item" key={d.drive}>
-                      <div>
-                        <div className="drive-status-title">
-                          {(() => {
-                            const activeJob = jobs.find((j) => j.drive === d.drive && isJobActive(j.state))
-                            return (
-                              <>
-                                {d.drive}
-                                {activeJob && <span className="disc-spinner" title={`${activeJob.state} in progress`} />}
-                              </>
-                            )
-                          })()}
-                        </div>
-                        <div className="drive-status-meta">{d.detail}</div>
-                      </div>
-                      <div className="drive-status-actions">
-                        <span className={`badge ${d.status === 'ready' ? 'ok' : d.status === 'empty' ? 'warn' : 'bad'}`}>
-                          {d.status}
-                        </span>
-                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
-                          Eject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="card">
               <h2>📍 System Info</h2>
               <div className="info-list">
                 <div className="info-item">
@@ -872,6 +833,10 @@ export default function App() {
                   <span className="label">Drives With Disc</span>
                   <span className="value">{driveStatus?.summary?.with_disc ?? 0}</span>
                 </div>
+                <div className="info-item">
+                  <span className="label">Active Jobs</span>
+                  <span className="value">{jobs.filter((j) => isJobActive(j.state)).length}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -882,7 +847,7 @@ export default function App() {
               <p className="empty-state">No jobs yet. Insert a disc to start.</p>
             ) : (
               <div className="jobs-list">
-                {jobs.slice(0, 10).map((job) => (
+                {jobs.slice(0, 6).map((job) => (
                   <div key={job.id} className="job-item">
                     <div className="job-header">
                       <span className="job-drive">{job.drive}</span>
