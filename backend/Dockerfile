@@ -10,24 +10,28 @@ RUN set -eux; \
             ca-certificates \
             curl \
             build-essential \
+            automake \
+            autoconf \
+            libtool \
             pkg-config \
             libc6-dev \
             libssl-dev \
             libexpat1-dev \
             zlib1g-dev; \
-        MKV_VER=""; \
+        MKV_VER=""; OSS_TGZ=""; BIN_TGZ=""; \
         for v in 1.18.1 1.18.0 1.17.9 1.17.8 1.17.7; do \
-            if curl -fsI "https://www.makemkv.com/download/makemkv-oss-${v}.tar.gz" >/dev/null \
-                 && curl -fsI "https://www.makemkv.com/download/makemkv-bin-${v}.tar.gz" >/dev/null; then \
+            OSS_TGZ="/tmp/makemkv-oss-${v}.tar.gz"; \
+            BIN_TGZ="/tmp/makemkv-bin-${v}.tar.gz"; \
+            if curl -fSL "https://www.makemkv.com/download/makemkv-oss-${v}.tar.gz" -o "${OSS_TGZ}" \
+                 && curl -fSL "https://www.makemkv.com/download/makemkv-bin-${v}.tar.gz" -o "${BIN_TGZ}"; then \
                 MKV_VER="$v"; \
                 break; \
             fi; \
+            rm -f "${OSS_TGZ}" "${BIN_TGZ}"; \
         done; \
-        test -n "$MKV_VER"; \
-        curl -fsSL "https://www.makemkv.com/download/makemkv-oss-${MKV_VER}.tar.gz" -o /tmp/makemkv-oss.tar.gz; \
-        curl -fsSL "https://www.makemkv.com/download/makemkv-bin-${MKV_VER}.tar.gz" -o /tmp/makemkv-bin.tar.gz; \
-        tar -xzf /tmp/makemkv-oss.tar.gz -C /tmp; \
-        tar -xzf /tmp/makemkv-bin.tar.gz -C /tmp; \
+        if [ -z "$MKV_VER" ]; then echo "No supported MakeMKV source tarball found"; exit 1; fi; \
+        tar -xzf "${OSS_TGZ}" -C /tmp; \
+        tar -xzf "${BIN_TGZ}" -C /tmp; \
         cd /tmp/makemkv-oss-${MKV_VER}; \
         ./configure; \
         make -j"$(nproc)"; \
@@ -38,6 +42,9 @@ RUN set -eux; \
         rm -rf /tmp/makemkv-*; \
         apt-get purge -y --auto-remove \
             build-essential \
+            automake \
+            autoconf \
+            libtool \
             pkg-config \
             libc6-dev \
             libssl-dev \
@@ -55,5 +62,5 @@ COPY backend /app/backend
 ENV PYTHONPATH=/app
 EXPOSE 7272
 
-# Note: makemkvcon is expected to be available on the host/server environment.
+# makemkvcon is built into this image during docker build.
 CMD ["python", "-m", "backend.run"]
