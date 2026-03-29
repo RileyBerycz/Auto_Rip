@@ -18,6 +18,8 @@ RUN set -eux; \
             libssl-dev \
             libexpat1-dev \
             libavcodec-dev \
+            libgl1-mesa-dev \
+            qtbase5-dev \
             zlib1g-dev; \
         MKV_VER=""; OSS_TGZ=""; BIN_TGZ=""; \
         for v in 1.18.3 1.18.2 1.18.1 1.18.0 1.17.9 1.17.8 1.17.7; do \
@@ -31,14 +33,20 @@ RUN set -eux; \
             rm -f "${OSS_TGZ}" "${BIN_TGZ}"; \
         done; \
         if [ -z "$MKV_VER" ]; then echo "No supported MakeMKV source tarball found"; exit 1; fi; \
+        echo "Using MakeMKV version ${MKV_VER}"; \
         tar -xzf "${OSS_TGZ}" -C /tmp; \
         tar -xzf "${BIN_TGZ}" -C /tmp; \
         cd /tmp/makemkv-oss-${MKV_VER}; \
+        echo "Configuring makemkv-oss"; \
         ./configure; \
+        echo "Building makemkv-oss"; \
         make -j"$(nproc)"; \
+        echo "Installing makemkv-oss"; \
         make install; \
         cd /tmp/makemkv-bin-${MKV_VER}; \
+        echo "Building makemkv-bin"; \
         make -f makefile.linux -j"$(nproc)"; \
+        echo "Installing makemkv-bin"; \
         make -f makefile.linux install; \
         rm -rf /tmp/makemkv-*; \
         apt-get purge -y --auto-remove \
@@ -51,6 +59,8 @@ RUN set -eux; \
             libssl-dev \
             libexpat1-dev \
             libavcodec-dev \
+            libgl1-mesa-dev \
+            qtbase5-dev \
             zlib1g-dev; \
         command -v makemkvcon >/dev/null; \
         rm -rf /var/lib/apt/lists/*
