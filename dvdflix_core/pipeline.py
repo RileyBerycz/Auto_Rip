@@ -63,6 +63,17 @@ class RipPipeline:
             else:
                 job.state = JobState.complete
                 job.output_path = str(output_dir)
+                total_seconds = int(sum(track.duration_minutes * 60 for track in disc.tracks))
+                disc_hash = self.cache.compute_disc_hash(disc.label, len(disc.tracks), total_seconds)
+                self.cache.record_disc_rip(
+                    disc_hash=disc_hash,
+                    disc_label=disc.label,
+                    title=identified.title,
+                    year=str(identified.year or ""),
+                    media_type=identified.media_type,
+                    drive=drive,
+                    output_path=str(output_dir),
+                )
 
             job.updated_at = datetime.utcnow()
             return job

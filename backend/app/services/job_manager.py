@@ -53,6 +53,46 @@ class JobManager:
             ordered = sorted(self.jobs.values(), key=lambda j: j.updated_at, reverse=True)
             return [j.to_dict() for j in ordered]
 
+    def get_job(self, job_id: str) -> dict | None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            return job.to_dict() if job else None
+
+    def update_job(self, job_id: str, updates: dict) -> bool:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return False
+
+            if updates.get("title") is not None:
+                job.title = str(updates.get("title", ""))
+            if updates.get("media_type") is not None:
+                job.media_type = str(updates.get("media_type", "movie"))
+            if updates.get("error") is not None:
+                job.error = str(updates.get("error", ""))
+            job.updated_at = datetime.utcnow()
+            return True
+
+    def list_history(self, limit: int = 500) -> list[dict[str, str]]:
+        return self.pipeline.cache.list_disc_history(limit=limit)
+
+    def update_history(
+        self,
+        disc_hash: str,
+        *,
+        title: str,
+        year: str,
+        media_type: str,
+        notes: str,
+    ) -> bool:
+        return self.pipeline.cache.update_disc_history(
+            disc_hash,
+            title=title,
+            year=year,
+            media_type=media_type,
+            notes=notes,
+        )
+
     def start_job(self, drive: str) -> dict:
         with self.lock:
             active = self.inflight_by_drive.get(drive)

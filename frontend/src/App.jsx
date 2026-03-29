@@ -4,7 +4,7 @@ import { io } from 'socket.io-client'
 const envApiUrl = import.meta.env.VITE_API_URL || ''
 const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 
-const pages = ['dashboard', 'ripper-status', 'settings', 'library']
+const pages = ['dashboard', 'ripper-status', 'settings', 'library', 'history']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -69,12 +69,14 @@ export default function App() {
   const [health, setHealth] = useState(null)
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
+  const [history, setHistory] = useState([])
   
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [historyEditModal, setHistoryEditModal] = useState(null)
 
   const effectiveSocketUrl = socketUrl || apiUrl
   const socket = useMemo(() => io(effectiveSocketUrl, { autoConnect: false, transports: ['websocket', 'polling'] }), [effectiveSocketUrl])
@@ -111,13 +113,14 @@ export default function App() {
   }
 
   const fetchAuthedData = async () => {
-    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes] = await Promise.all([
+    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes] = await Promise.all([
       fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/capabilities`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/settings`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
+      fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
     ])
 
     if (healthRes.status === 401) {
@@ -136,6 +139,9 @@ export default function App() {
 
     const profileData = await profileRes.json()
     if (profileData?.profile) setProfileDraft(profileData.profile)
+
+    const historyData = await historyRes.json()
+    setHistory(historyData?.history || [])
   }
 
   useEffect(() => {
@@ -253,6 +259,29 @@ export default function App() {
     } else {
       showMessage('Failed to override title', 'error')
     }
+  }
+
+  const saveHistoryCorrection = async () => {
+    if (!historyEditModal) return
+    const payload = {
+      title: historyEditModal.title || '',
+      year: historyEditModal.year || '',
+      media_type: historyEditModal.media_type || 'movie',
+      notes: historyEditModal.notes || '',
+    }
+    const resp = await fetch(`${apiUrl}/api/history/${historyEditModal.disc_hash}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}))
+      showMessage(data.error || 'Failed to update history record', 'error')
+      return
+    }
+    showMessage('History record updated', 'success')
+    setHistoryEditModal(null)
+    await fetchAuthedData()
   }
 
   const jobStateColor = (state) => {
@@ -423,6 +452,7 @@ export default function App() {
                 {p === 'ripper-status' && '⚙️ Ripper'}
                 {p === 'settings' && '⚡ Settings'}
                 {p === 'library' && '📚 Library'}
+                {p === 'history' && '🕘 History'}
               </button>
             ))}
           </nav>
@@ -612,6 +642,54 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {activePage === 'history' && (
+        <div className="content">
+          <div className="card">
+            <h2>🕘 Ripped Disc History ({history.length})</h2>
+            {history.length === 0 ? (
+              <p className="empty-state">No completed rips have been recorded yet.</p>
+            ) : (
+              <div className="history-list">
+                {history.map((item) => (
+                  <div key={item.disc_hash} className="history-item">
+                    <div className="history-main">
+                      <div className="history-title-row">
+                        <span className="job-drive">{item.drive || 'unknown drive'}</span>
+                        <span className="job-title">{item.title || item.disc_label || 'Unknown title'}</span>
+                        <span className="job-state" style={{ backgroundColor: item.media_type === 'tv' ? '#8b5cf6' : '#10b981' }}>
+                          {item.media_type || 'movie'}
+                        </span>
+                      </div>
+                      <div className="history-meta">
+                        <span>Disc: {item.disc_label || 'n/a'}</span>
+                        <span>Year: {item.year || 'n/a'}</span>
+                        <span>Ripped: {item.ripped_at || 'n/a'}</span>
+                      </div>
+                      {item.output_path && <div className="history-path">{item.output_path}</div>}
+                      {item.notes && <div className="history-notes">Notes: {item.notes}</div>}
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        setHistoryEditModal({
+                          disc_hash: item.disc_hash,
+                          title: item.title || '',
+                          year: item.year || '',
+                          media_type: item.media_type || 'movie',
+                          notes: item.notes || '',
+                        })
+                      }
+                    >
+                      Edit Metadata
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
 
     {/* Manual Title Override Modal */}
@@ -684,6 +762,56 @@ export default function App() {
 
           <div className="modal-footer">
             <button className="btn-secondary" onClick={() => setOverrideModal(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {historyEditModal && (
+      <div className="modal-overlay" onClick={() => setHistoryEditModal(null)}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>✏️ Edit Rip Metadata</h2>
+            <button className="modal-close" onClick={() => setHistoryEditModal(null)}>✕</button>
+          </div>
+
+          <div className="modal-body">
+            <div className="form-group">
+              <label>Title</label>
+              <input
+                value={historyEditModal.title}
+                onChange={(e) => setHistoryEditModal({ ...historyEditModal, title: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Year</label>
+              <input
+                value={historyEditModal.year}
+                onChange={(e) => setHistoryEditModal({ ...historyEditModal, year: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Media Type</label>
+              <select
+                value={historyEditModal.media_type}
+                onChange={(e) => setHistoryEditModal({ ...historyEditModal, media_type: e.target.value })}
+              >
+                <option value="movie">movie</option>
+                <option value="tv">tv</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Notes</label>
+              <input
+                value={historyEditModal.notes}
+                onChange={(e) => setHistoryEditModal({ ...historyEditModal, notes: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn-secondary" onClick={() => setHistoryEditModal(null)}>Cancel</button>
+            <button className="btn-primary" onClick={saveHistoryCorrection}>Save</button>
           </div>
         </div>
       </div>

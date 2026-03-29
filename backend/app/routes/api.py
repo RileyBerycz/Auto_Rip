@@ -346,14 +346,14 @@ def override_job_title(job_id: str) -> tuple:
     if not job:
         return jsonify({"ok": False, "error": "job not found"}), 404
     
-    # Update job metadata
-    job["title"] = title
-    job["year"] = year
-    job["media_type"] = media_type
-    job["manual_override"] = True
-    job["confidence"] = 100
-    
-    _manager().update_job(job_id, job)
+    # Update in-memory job metadata for active dashboard visibility.
+    _manager().update_job(
+        job_id,
+        {
+            "title": title,
+            "media_type": media_type,
+        },
+    )
     return jsonify({"ok": True}), 200
 
 
@@ -381,3 +381,42 @@ def search_tmdb() -> tuple:
         return jsonify({"ok": True, "results": results}), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@api_bp.get("/history")
+@require_auth
+def history() -> tuple:
+    raw_limit = request.args.get("limit", "500")
+    try:
+        limit = max(1, min(5000, int(raw_limit)))
+    except ValueError:
+        limit = 500
+
+    items = _manager().list_history(limit=limit)
+    return jsonify({"ok": True, "history": items}), 200
+
+
+@api_bp.post("/history/<disc_hash>")
+@require_auth
+def update_history(disc_hash: str) -> tuple:
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title", "")).strip()
+    year = str(payload.get("year", "")).strip()
+    media_type = str(payload.get("media_type", "movie")).strip().lower()
+    notes = str(payload.get("notes", "")).strip()
+
+    if not title:
+        return jsonify({"ok": False, "error": "title is required"}), 400
+    if media_type not in {"movie", "tv"}:
+        return jsonify({"ok": False, "error": "media_type must be movie or tv"}), 400
+
+    ok = _manager().update_history(
+        disc_hash,
+        title=title,
+        year=year,
+        media_type=media_type,
+        notes=notes,
+    )
+    if not ok:
+        return jsonify({"ok": False, "error": "history record not found"}), 404
+    return jsonify({"ok": True}), 200
