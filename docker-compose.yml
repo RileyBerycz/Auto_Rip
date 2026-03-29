@@ -1,33 +1,15 @@
 services:
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-backend}:${IMAGE_TAG:-latest}
+    image: ghcr.io/rileyberycz/dvdflix-backend:latest
     pull_policy: always
     command: ["python", "-m", "backend.run"]
+    privileged: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      - MOVIES_PATH
-      - TV_PATH
-      - TEMP_RIP_PATH
-      - DRIVES
-      - TMDB_API_KEY
-      - OMDB_API_KEY
-      - TVDB_API_KEY
-      - TVDB_PIN
-      - OLLAMA_URL
-      - OLLAMA_MODEL
-      - RUNTIME_TOLERANCE_MINUTES
-      - IDENTIFY_MIN_CONFIDENCE
-      - MAX_IDENTIFY_WORKERS
-      - DISC_CACHE_DB
-      - OPENSUBTITLES_API_KEY
-      - ENABLE_WEB_SEARCH
-      - HSA_OVERRIDE_GFX_VERSION
-      - SEARXNG_URL
-      - HANDBRAKE_PRESET
-      - FLASK_ENV
+      - FLASK_ENV=production
     ports:
-      - "${BACKEND_PORT:-7272}:7272"
+      - "7272:7272"
     volumes:
       - dvdflix-data:/app/data
       - dvdflix-movies:/media/movies
@@ -46,15 +28,12 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-frontend}:${IMAGE_TAG:-latest}
+    image: ghcr.io/rileyberycz/dvdflix-frontend:latest
     pull_policy: always
     stdin_open: true
     tty: true
-    environment:
-      - VITE_API_URL
-      - VITE_SOCKET_URL
     ports:
-      - "${FRONTEND_PORT:-7273}:7273"
+      - "7273:7273"
     depends_on:
       backend:
         condition: service_healthy

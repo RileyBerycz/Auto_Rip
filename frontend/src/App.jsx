@@ -4,7 +4,7 @@ import { io } from 'socket.io-client'
 const envApiUrl = import.meta.env.VITE_API_URL || ''
 const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 
-const pages = ['dashboard', 'ripper-status', 'settings', 'library', 'history']
+const pages = ['dashboard', 'ripper-status', 'settings', 'library', 'history', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -25,6 +25,8 @@ export default function App() {
   const [setupStatus, setSetupStatus] = useState(null)
   const [setupError, setSetupError] = useState('')
   const [detectedDrives, setDetectedDrives] = useState([])
+  const [manualSetupDrives, setManualSetupDrives] = useState(false)
+  const [manualSettingsDrives, setManualSettingsDrives] = useState(false)
   const [token, setToken] = useState(localStorage.getItem('dvdflix_token') || '')
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState('') // 'success', 'error', 'info'
@@ -50,6 +52,8 @@ export default function App() {
       DISC_CACHE_DB: '/app/data/disc_cache.db',
       OPENSUBTITLES_API_KEY: '',
       ENABLE_WEB_SEARCH: 'false',
+      SEARXNG_URL: '',
+      HANDBRAKE_PRESET: 'default',
     },
     profile: {
       PROFILE_SERVER: '',
@@ -71,6 +75,9 @@ export default function App() {
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
   const [history, setHistory] = useState([])
+  const [accounts, setAccounts] = useState([])
+  const [currentUser, setCurrentUser] = useState(null)
+  const [newAccountForm, setNewAccountForm] = useState({ username: '', password: '', is_admin: false })
   
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
@@ -115,7 +122,7 @@ export default function App() {
   }
 
   const fetchAuthedData = async () => {
-    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes] = await Promise.all([
+    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes] = await Promise.all([
       fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
@@ -123,6 +130,7 @@ export default function App() {
       fetch(`${apiUrl}/api/settings`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
+      fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
     ])
 
     if (healthRes.status === 401) {
@@ -144,6 +152,10 @@ export default function App() {
 
     const historyData = await historyRes.json()
     setHistory(historyData?.history || [])
+
+    const accountsData = await accountsRes.json()
+    setAccounts(accountsData?.users || [])
+    setCurrentUser(accountsData?.current_user || null)
   }
 
   useEffect(() => {
@@ -213,8 +225,12 @@ export default function App() {
       const drives = data?.drives || []
       setDetectedDrives(drives)
       if (drives.length === 0) {
+        setManualSetupDrives(true)
+        setManualSettingsDrives(true)
         showMessage('No drives detected inside container. Check Docker device mapping.', 'info')
       } else {
+        setManualSetupDrives(false)
+        setManualSettingsDrives(false)
         showMessage(`Detected ${drives.length} drive(s)`, 'success')
       }
     } catch (err) {
@@ -303,6 +319,38 @@ export default function App() {
     await fetchAuthedData()
   }
 
+  const createAccount = async () => {
+    const payload = {
+      username: (newAccountForm.username || '').trim(),
+      password: newAccountForm.password || '',
+      is_admin: !!newAccountForm.is_admin,
+    }
+    if (!payload.username || !payload.password) {
+      showMessage('Username and password are required', 'error')
+      return
+    }
+
+    const resp = await fetch(`${apiUrl}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(payload),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || 'Failed to create account', 'error')
+      return
+    }
+    showMessage('Account created', 'success')
+    setNewAccountForm({ username: '', password: '', is_admin: false })
+    await fetchAuthedData()
+  }
+
+  const logout = () => {
+    setToken('')
+    localStorage.removeItem('dvdflix_token')
+    showMessage('Logged out', 'info')
+  }
+
   const jobStateColor = (state) => {
     switch (state) {
       case 'complete': return '#10b981'
@@ -388,12 +436,31 @@ export default function App() {
                 <input value={setupForm.settings.TV_PATH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TV_PATH: e.target.value } })} />
               </div>
               <div className="form-group">
+                <label>Temp Rip Path</label>
+                <input value={setupForm.settings.TEMP_RIP_PATH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TEMP_RIP_PATH: e.target.value } })} />
+              </div>
+              <div className="form-group">
                 <label>TMDB API Key</label>
                 <input type="password" value={setupForm.settings.TMDB_API_KEY} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TMDB_API_KEY: e.target.value } })} />
               </div>
               <div className="form-group">
-                <label>Drives</label>
-                <input value={setupForm.settings.DRIVES} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, DRIVES: e.target.value } })} />
+                <label>OMDB API Key</label>
+                <input type="password" value={setupForm.settings.OMDB_API_KEY} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OMDB_API_KEY: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>TVDB API Key</label>
+                <input type="password" value={setupForm.settings.TVDB_API_KEY} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TVDB_API_KEY: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>TVDB PIN</label>
+                <input value={setupForm.settings.TVDB_PIN} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TVDB_PIN: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>OpenSubtitles API Key</label>
+                <input type="password" value={setupForm.settings.OPENSUBTITLES_API_KEY} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OPENSUBTITLES_API_KEY: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Drives (Auto-Detect)</label>
                 <div className="inline-actions">
                   <button
                     type="button"
@@ -418,7 +485,21 @@ export default function App() {
                   >
                     Use Detected
                   </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setManualSetupDrives((v) => !v)}
+                  >
+                    {manualSetupDrives ? 'Hide Manual Entry' : 'Manual Entry'}
+                  </button>
                 </div>
+                {manualSetupDrives && (
+                  <input
+                    placeholder="/dev/sr0,/dev/sr1"
+                    value={setupForm.settings.DRIVES}
+                    onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, DRIVES: e.target.value } })}
+                  />
+                )}
                 <small className="field-help">
                   Leave blank to auto-detect `/dev/sr*` drives. Detected now: {detectedDrives.length ? detectedDrives.join(', ') : 'none'}
                 </small>
@@ -439,7 +520,47 @@ export default function App() {
                 <label>Confidence Threshold</label>
                 <input type="number" min="0" max="100" value={setupForm.settings.IDENTIFY_MIN_CONFIDENCE} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, IDENTIFY_MIN_CONFIDENCE: e.target.value } })} />
               </div>
+              <div className="form-group">
+                <label>Runtime Tolerance Minutes</label>
+                <input type="number" min="0" max="60" value={setupForm.settings.RUNTIME_TOLERANCE_MINUTES} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, RUNTIME_TOLERANCE_MINUTES: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Max Identify Workers</label>
+                <input type="number" min="1" max="8" value={setupForm.settings.MAX_IDENTIFY_WORKERS} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, MAX_IDENTIFY_WORKERS: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Disc Cache DB Path</label>
+                <input value={setupForm.settings.DISC_CACHE_DB} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, DISC_CACHE_DB: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Enable Web Search</label>
+                <select value={setupForm.settings.ENABLE_WEB_SEARCH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, ENABLE_WEB_SEARCH: e.target.value } })}>
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Searxng URL</label>
+                <input value={setupForm.settings.SEARXNG_URL} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, SEARXNG_URL: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>HandBrake Preset</label>
+                <select value={setupForm.settings.HANDBRAKE_PRESET} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, HANDBRAKE_PRESET: e.target.value } })}>
+                  <option value="default">default (all tracks)</option>
+                  <option value="standard">standard (main feature)</option>
+                </select>
+              </div>
             </div>
+          </div>
+
+          <div className="setup-card">
+            <h2>ℹ️ Docker-Level Requirements</h2>
+            <p className="field-help">
+              Keys and runtime behavior are fully configurable in this UI. Docker still needs host-level mappings for optical devices and media folders.
+            </p>
+            <p className="field-help">
+              Required at deploy time in Dockge: `HOST_MOVIES_PATH`, `HOST_TV_PATH`, `HOST_TEMP_RIP_PATH`, and `/dev/sr*` device mapping.
+            </p>
           </div>
 
           <button className="btn-primary full-width" onClick={initializeSetup}>
@@ -500,6 +621,7 @@ export default function App() {
                 {p === 'settings' && '⚡ Settings'}
                 {p === 'library' && '📚 Library'}
                 {p === 'history' && '🕘 History'}
+                {p === 'accounts' && '👤 Accounts'}
               </button>
             ))}
           </nav>
@@ -508,6 +630,7 @@ export default function App() {
           <button className="btn-icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
+          <button className="btn-secondary" onClick={logout}>Logout</button>
         </div>
       </header>
 
@@ -649,12 +772,103 @@ export default function App() {
                     <input value={settingsDraft.TV_PATH || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TV_PATH: e.target.value })} />
                   </div>
                   <div className="form-group">
+                    <label>Temp Rip Path</label>
+                    <input value={settingsDraft.TEMP_RIP_PATH || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TEMP_RIP_PATH: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Drives (Auto-Detect)</label>
+                    <div className="inline-actions">
+                      <button type="button" className="btn-secondary" onClick={detectDrives}>
+                        Detect Drives
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => setSettingsDraft({ ...settingsDraft, DRIVES: detectedDrives.join(',') })}
+                        disabled={detectedDrives.length === 0}
+                      >
+                        Use Detected
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => setManualSettingsDrives((v) => !v)}
+                      >
+                        {manualSettingsDrives ? 'Hide Manual Entry' : 'Manual Entry'}
+                      </button>
+                    </div>
+                    {manualSettingsDrives && (
+                      <input
+                        placeholder="/dev/sr0,/dev/sr1"
+                        value={settingsDraft.DRIVES || ''}
+                        onChange={(e) => setSettingsDraft({ ...settingsDraft, DRIVES: e.target.value })}
+                      />
+                    )}
+                    <small className="field-help">
+                      Current detection: {detectedDrives.length ? detectedDrives.join(', ') : 'none'}
+                    </small>
+                  </div>
+                  <div className="form-group">
                     <label>TMDB API Key</label>
                     <input type="password" value={settingsDraft.TMDB_API_KEY || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TMDB_API_KEY: e.target.value })} />
                   </div>
                   <div className="form-group">
+                    <label>OMDB API Key</label>
+                    <input type="password" value={settingsDraft.OMDB_API_KEY || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OMDB_API_KEY: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>TVDB API Key</label>
+                    <input type="password" value={settingsDraft.TVDB_API_KEY || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TVDB_API_KEY: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>TVDB PIN</label>
+                    <input value={settingsDraft.TVDB_PIN || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TVDB_PIN: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>OpenSubtitles API Key</label>
+                    <input type="password" value={settingsDraft.OPENSUBTITLES_API_KEY || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OPENSUBTITLES_API_KEY: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Ollama URL</label>
+                    <input value={settingsDraft.OLLAMA_URL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_URL: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Ollama Model</label>
+                    <input value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Runtime Tolerance Minutes</label>
+                    <input type="number" min="0" max="60" value={settingsDraft.RUNTIME_TOLERANCE_MINUTES || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, RUNTIME_TOLERANCE_MINUTES: e.target.value })} />
+                  </div>
+                  <div className="form-group">
                     <label>Confidence Threshold</label>
                     <input type="number" min="0" max="100" value={settingsDraft.IDENTIFY_MIN_CONFIDENCE || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, IDENTIFY_MIN_CONFIDENCE: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Max Identify Workers</label>
+                    <input type="number" min="1" max="8" value={settingsDraft.MAX_IDENTIFY_WORKERS || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, MAX_IDENTIFY_WORKERS: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Disc Cache DB Path</label>
+                    <input value={settingsDraft.DISC_CACHE_DB || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, DISC_CACHE_DB: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Enable Web Search</label>
+                    <select value={settingsDraft.ENABLE_WEB_SEARCH || 'false'} onChange={(e) => setSettingsDraft({ ...settingsDraft, ENABLE_WEB_SEARCH: e.target.value })}>
+                      <option value="false">false</option>
+                      <option value="true">true</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Searxng URL</label>
+                    <input value={settingsDraft.SEARXNG_URL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, SEARXNG_URL: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>HandBrake Preset</label>
+                    <select value={settingsDraft.HANDBRAKE_PRESET || 'default'} onChange={(e) => setSettingsDraft({ ...settingsDraft, HANDBRAKE_PRESET: e.target.value })}>
+                      <option value="default">default (all tracks)</option>
+                      <option value="standard">standard (main feature)</option>
+                    </select>
                   </div>
                 </div>
                 <button className="btn-primary" onClick={saveSettings}>
@@ -734,6 +948,72 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {activePage === 'accounts' && (
+        <div className="content">
+          <div className="grid-2">
+            <div className="card">
+              <h2>👤 Accounts</h2>
+              {currentUser && (
+                <p className="field-help">
+                  Signed in as <strong>{currentUser.username}</strong>
+                  {currentUser.is_admin ? ' (admin)' : ''}
+                </p>
+              )}
+              <div className="history-list">
+                {accounts.map((u) => (
+                  <div key={u.id} className="history-item">
+                    <div className="history-main">
+                      <div className="history-title-row">
+                        <span className="job-title">{u.username}</span>
+                        <span className="job-state" style={{ backgroundColor: u.is_admin ? '#10b981' : '#6b7280' }}>
+                          {u.is_admin ? 'admin' : 'user'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card">
+              <h2>➕ Create Account</h2>
+              {currentUser?.is_admin ? (
+                <>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      value={newAccountForm.username}
+                      onChange={(e) => setNewAccountForm({ ...newAccountForm, username: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      value={newAccountForm.password}
+                      onChange={(e) => setNewAccountForm({ ...newAccountForm, password: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Role</label>
+                    <select
+                      value={newAccountForm.is_admin ? 'admin' : 'user'}
+                      onChange={(e) => setNewAccountForm({ ...newAccountForm, is_admin: e.target.value === 'admin' })}
+                    >
+                      <option value="user">user</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </div>
+                  <button className="btn-primary" onClick={createAccount}>Create Account</button>
+                </>
+              ) : (
+                <p className="empty-state">Only admin users can create accounts.</p>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -26,6 +26,13 @@ def _auth_token() -> str:
     return ""
 
 
+def _current_user() -> dict | None:
+    token = _auth_token()
+    if not token:
+        return None
+    return _store().get_user_by_token(token)
+
+
 def require_auth(func):
     @wraps(func)
     def wrapped(*args, **kwargs):
@@ -178,6 +185,40 @@ def login() -> tuple:
     if not token:
         return jsonify({"ok": False, "error": "invalid credentials"}), 401
     return jsonify({"ok": True, "token": token}), 200
+
+
+@api_bp.get("/accounts")
+@require_auth
+def accounts_list() -> tuple:
+    user = _current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    users = _store().list_users()
+    return jsonify({"ok": True, "users": users, "current_user": user}), 200
+
+
+@api_bp.post("/accounts")
+@require_auth
+def accounts_create() -> tuple:
+    actor = _current_user()
+    if not actor:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    if not actor.get("is_admin"):
+        return jsonify({"ok": False, "error": "admin required"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", "")).strip()
+    is_admin = bool(payload.get("is_admin", False))
+
+    try:
+        _store().create_user(username, password, is_admin=is_admin)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 409
+
+    return jsonify({"ok": True}), 201
 
 
 @api_bp.get("/settings")

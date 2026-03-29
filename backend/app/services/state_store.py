@@ -99,6 +99,10 @@ class StateStore:
         return bool(user_count > 0 and setup and setup["value"] == "true")
 
     def create_admin(self, username: str, password: str) -> None:
+        self.create_user(username, password, is_admin=True)
+        self.set_setting("SETUP_COMPLETE", "true")
+
+    def create_user(self, username: str, password: str, is_admin: bool = False) -> None:
         if not username or not password:
             raise ValueError("username and password are required")
         if len(password) < 8:
@@ -108,10 +112,45 @@ class StateStore:
         pwd_hash = self._hash_password(password, salt)
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO users (username, password_hash, salt, is_admin) VALUES (?, ?, ?, 1)",
-                (username, pwd_hash, salt),
+                "INSERT INTO users (username, password_hash, salt, is_admin) VALUES (?, ?, ?, ?)",
+                (username, pwd_hash, salt, 1 if is_admin else 0),
             )
-        self.set_setting("SETUP_COMPLETE", "true")
+
+    def get_user_by_token(self, token: str) -> dict | None:
+        if not token:
+            return None
+        token_hash = self._hash_token(token)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT u.id, u.username, u.is_admin
+                FROM auth_tokens t
+                JOIN users u ON u.id = t.user_id
+                WHERE t.token_hash = ?
+                """,
+                (token_hash,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": int(row["id"]),
+            "username": row["username"],
+            "is_admin": bool(row["is_admin"]),
+        }
+
+    def list_users(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, username, is_admin FROM users ORDER BY username"
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "username": row["username"],
+                "is_admin": bool(row["is_admin"]),
+            }
+            for row in rows
+        ]
 
     def login(self, username: str, password: str) -> str | None:
         with self._connect() as conn:
