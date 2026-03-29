@@ -4,52 +4,61 @@ import { io } from 'socket.io-client'
 const envApiUrl = import.meta.env.VITE_API_URL || ''
 const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 
-const pages = ['overview', 'ripper', 'profile', 'settings', 'library']
+const pages = ['dashboard', 'ripper-status', 'settings', 'library']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
-  'Agent tools: search_disc_label, tmdb_search, search_dialogue, runtime checks',
-  'Low confidence fallback: temp rip, subtitle extract/OCR, dialogue-assisted re-identification',
-  'Validation: runtime tolerance and language alignment',
+  'LLM proposes likely title/year, then TMDB candidates are hydrated with runtime metadata',
+  'Cross-check scoring validates runtime, label overlap, and optional OMDB/TVDB corroboration',
+  'Low-confidence results fall back to conservative LLM naming to avoid false positives',
   'SQLite disc cache stores label-to-title mapping to avoid repeat identification',
 ]
 
 export default function App() {
-  const [apiUrlInput, setApiUrlInput] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
-  const [socketUrlInput, setSocketUrlInput] = useState(localStorage.getItem('dvdflix_socket_url') || envSocketUrl)
   const [apiUrl, setApiUrl] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
   const [socketUrl, setSocketUrl] = useState(localStorage.getItem('dvdflix_socket_url') || envSocketUrl)
+  const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
+  const [socketUrlInput, setSocketUrlInput] = useState(socketUrl)
   const [theme, setTheme] = useState(localStorage.getItem('dvdflix_theme') || 'dark')
-  const [activePage, setActivePage] = useState('overview')
+  const [activePage, setActivePage] = useState('dashboard')
 
   const [setupStatus, setSetupStatus] = useState(null)
   const [setupError, setSetupError] = useState('')
   const [token, setToken] = useState(localStorage.getItem('dvdflix_token') || '')
+  const [message, setMessage] = useState('')
+  const [messageType, setMessageType] = useState('') // 'success', 'error', 'info'
+
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
   const [setupForm, setSetupForm] = useState({
     username: '',
     password: '',
     settings: {
-      MOVIES_PATH: '',
-      TV_PATH: '',
-      TEMP_RIP_PATH: '',
-      DRIVES: '',
+      MOVIES_PATH: '/media/movies',
+      TV_PATH: '/media/tvshows',
+      TEMP_RIP_PATH: '/media/tmp',
+      DRIVES: '/dev/sr0,/dev/sr1,/dev/sr2',
       TMDB_API_KEY: '',
-      OLLAMA_URL: '',
-      OLLAMA_MODEL: '',
-      RUNTIME_TOLERANCE_MINUTES: '',
-      MAX_IDENTIFY_WORKERS: '',
-      DISC_CACHE_DB: '',
+      OMDB_API_KEY: '',
+      TVDB_API_KEY: '',
+      TVDB_PIN: '',
+      OLLAMA_URL: 'http://host.docker.internal:11434',
+      OLLAMA_MODEL: 'qwen2.5:7b',
+      RUNTIME_TOLERANCE_MINUTES: '8',
+      IDENTIFY_MIN_CONFIDENCE: '80',
+      MAX_IDENTIFY_WORKERS: '1',
+      DISC_CACHE_DB: '/app/data/disc_cache.db',
+      OPENSUBTITLES_API_KEY: '',
+      ENABLE_WEB_SEARCH: 'false',
     },
     profile: {
       PROFILE_SERVER: '',
       PROFILE_STORAGE_ROOT: '',
-      PROFILE_DRIVE_SR0: '',
-      PROFILE_DRIVE_SR1: '',
-      PROFILE_DRIVE_SR2: '',
-      PROFILE_GPU: '',
+      PROFILE_DRIVE_SR0: 'SR0',
+      PROFILE_DRIVE_SR1: 'SR1',
+      PROFILE_DRIVE_SR2: 'SR2',
+      PROFILE_GPU: 'CPU',
       PROFILE_JELLYFIN_URL: '',
-      PROFILE_OLLAMA_MODEL: '',
+      PROFILE_OLLAMA_MODEL: 'qwen2.5:7b',
       PROFILE_NOTES: '',
     },
   })
@@ -57,30 +66,39 @@ export default function App() {
   const [settingsDraft, setSettingsDraft] = useState(null)
   const [profileDraft, setProfileDraft] = useState({})
   const [capabilities, setCapabilities] = useState(null)
-  const [message, setMessage] = useState('')
   const [health, setHealth] = useState(null)
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
+  
+  // Manual title override modal
+  const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
 
   const effectiveSocketUrl = socketUrl || apiUrl
   const socket = useMemo(() => io(effectiveSocketUrl, { autoConnect: false, transports: ['websocket', 'polling'] }), [effectiveSocketUrl])
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
   useEffect(() => {
-    document.body.setAttribute('data-theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('dvdflix_theme', theme)
   }, [theme])
 
+  const showMessage = (text, type = 'info') => {
+    setMessage(text)
+    setMessageType(type)
+    setTimeout(() => setMessage(''), 5000)
+  }
+
   const refreshSetupStatus = async () => {
     if (!apiUrl) {
-      setSetupError('Backend URL is not configured. Enter API URL below.')
+      showMessage('Backend URL is required', 'error')
       return
     }
     try {
       const resp = await fetch(`${apiUrl}/api/setup/status`)
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`)
-      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       setSetupStatus(data)
       setSetupError('')
@@ -88,7 +106,7 @@ export default function App() {
         setSettingsDraft(data.settings)
       }
     } catch (err) {
-      setSetupError(`Could not reach backend at ${apiUrl} (${err.message}).`) 
+      setSetupError(`Cannot reach ${apiUrl}: ${err.message}`)
     }
   }
 
@@ -114,36 +132,26 @@ export default function App() {
     setCapabilities(await capRes.json())
 
     const settingsData = await settingsRes.json()
-    if (settingsData?.settings) {
-      setSettingsDraft(settingsData.settings)
-    }
+    if (settingsData?.settings) setSettingsDraft(settingsData.settings)
 
     const profileData = await profileRes.json()
-    if (profileData?.profile) {
-      setProfileDraft(profileData.profile)
-    }
+    if (profileData?.profile) setProfileDraft(profileData.profile)
   }
 
   useEffect(() => {
-    if (apiUrl) {
-      refreshSetupStatus()
-    }
+    if (apiUrl) refreshSetupStatus()
   }, [apiUrl])
 
   useEffect(() => {
-    if (!token || !effectiveSocketUrl) {
-      return
-    }
+    if (!token || !effectiveSocketUrl) return
     fetchAuthedData()
     socket.connect()
-
     socket.on('job_update', (job) => {
       setJobs((prev) => {
         const rest = prev.filter((j) => j.id !== job.id)
         return [job, ...rest]
       })
     })
-
     return () => socket.disconnect()
   }, [socket, token, effectiveSocketUrl])
 
@@ -154,7 +162,6 @@ export default function App() {
     setSocketUrl(nextSocket)
     localStorage.setItem('dvdflix_api_url', nextApi)
     localStorage.setItem('dvdflix_socket_url', nextSocket)
-    setSetupError('')
   }
 
   const login = async () => {
@@ -165,12 +172,12 @@ export default function App() {
     })
     const data = await resp.json()
     if (!resp.ok) {
-      setMessage(data.error || 'Login failed')
+      showMessage(data.error || 'Login failed', 'error')
       return
     }
     setToken(data.token)
     localStorage.setItem('dvdflix_token', data.token)
-    setMessage('Login successful')
+    showMessage('Login successful', 'success')
   }
 
   const initializeSetup = async () => {
@@ -181,12 +188,12 @@ export default function App() {
     })
     const data = await resp.json()
     if (!resp.ok) {
-      setMessage(data.error || 'Setup failed')
+      showMessage(data.error || 'Setup failed', 'error')
       return
     }
     localStorage.setItem('dvdflix_token', data.token)
     setToken(data.token)
-    setMessage('Setup complete')
+    showMessage('Setup complete', 'success')
     await refreshSetupStatus()
   }
 
@@ -197,187 +204,488 @@ export default function App() {
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(settingsDraft),
     })
-    const data = await resp.json()
-    setMessage(resp.ok ? 'Runtime settings saved' : data.error || 'Failed to save settings')
-  }
-
-  const saveProfile = async () => {
-    const resp = await fetch(`${apiUrl}/api/profile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify(profileDraft),
-    })
-    const data = await resp.json()
-    setMessage(resp.ok ? 'System profile saved' : data.error || 'Failed to save profile')
+    showMessage(resp.ok ? 'Settings saved' : 'Failed to save', resp.ok ? 'success' : 'error')
   }
 
   const startAll = async () => {
     await fetch(`${apiUrl}/api/jobs/start-all`, { method: 'POST', headers: authHeaders })
+    showMessage('Started all drives', 'success')
   }
 
   const startDrive = async (drive) => {
-    await fetch(`${apiUrl}/api/jobs/start`, {
+    const resp = await fetch(`${apiUrl}/api/jobs/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ drive }),
     })
+    showMessage(resp.ok ? `Started ${drive}` : 'Error', resp.ok ? 'success' : 'error')
   }
 
-  const boolBadge = (ok) => <span className={`pill ${ok ? 'ok' : 'bad'}`}>{ok ? 'OK' : 'Missing'}</span>
+  const searchTMDB = async (query, mediaType = 'movie') => {
+    setSearching(true)
+    try {
+      const resp = await fetch(`${apiUrl}/api/search/tmdb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ query, media_type: mediaType }),
+      })
+      const data = await resp.json()
+      setSearchResults(data.ok ? (data.results || []) : [])
+      if (!data.ok) showMessage(data.error || 'Search failed', 'error')
+    } catch (err) {
+      showMessage('Search error: ' + err.message, 'error')
+    } finally {
+      setSearching(false)
+    }
+  }
 
+  const overrideJobTitle = async (jobId, title, year, mediaType) => {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/override-title`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ title, year, media_type: mediaType }),
+    })
+    if (resp.ok) {
+      showMessage('Title overridden successfully', 'success')
+      setOverrideModal(null)
+      setSearchQuery('')
+      setSearchResults([])
+    } else {
+      showMessage('Failed to override title', 'error')
+    }
+  }
+
+  const jobStateColor = (state) => {
+    switch (state) {
+      case 'complete': return '#10b981'
+      case 'failed': return '#ef4444'
+      case 'ripping': return '#f59e0b'
+      case 'identifying': return '#3b82f6'
+      case 'pending': return '#6b7280'
+      default: return '#999'
+    }
+  }
+
+  // Connection Setup Page
   if (!setupStatus) {
     return (
-      <div className="page">
-        <section className="card">
-          <h2>Connection</h2>
-          <label className="field"><span>Backend API URL</span><input value={apiUrlInput} onChange={(e) => setApiUrlInput(e.target.value)} /></label>
-          <label className="field"><span>Socket URL (optional)</span><input value={socketUrlInput} onChange={(e) => setSocketUrlInput(e.target.value)} /></label>
-          <button onClick={applyBackendUrls}>Save Connection</button>
-          {setupError && <p className="err">{setupError}</p>}
-          {setupError && <button onClick={refreshSetupStatus}>Retry</button>}
-        </section>
+      <div className="page setup-page">
+        <div className="setup-container">
+          <div className="setup-header">
+            <h1>🎬 DVDFlix</h1>
+            <p>Self-hosted DVD Operations Console</p>
+          </div>
+          
+          <div className="setup-card">
+            <h2>Backend Connection</h2>
+            <div className="form-group">
+              <label>API URL</label>
+              <input 
+                type="text"
+                placeholder="http://localhost:7272"
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>Socket URL (optional)</label>
+              <input 
+                type="text"
+                placeholder="Leave empty to use API URL"
+                value={socketUrlInput}
+                onChange={(e) => setSocketUrlInput(e.target.value)}
+              />
+            </div>
+            <button className="btn-primary" onClick={applyBackendUrls}>
+              Connect
+            </button>
+            {setupError && <div className="alert alert-error">{setupError}</div>}
+          </div>
+        </div>
       </div>
     )
   }
 
+  // First-Run Setup
   if (!setupStatus.configured) {
     return (
-      <div className="page">
-        <header className="hero"><h1>DVDFlix First-Run Setup</h1></header>
-        <section className="card">
-          <h2>Admin Account</h2>
-          <label className="field"><span>Username</span><input value={setupForm.username} onChange={(e) => setSetupForm({ ...setupForm, username: e.target.value })} /></label>
-          <label className="field"><span>Password</span><input type="password" value={setupForm.password} onChange={(e) => setSetupForm({ ...setupForm, password: e.target.value })} /></label>
-        </section>
-        <section className="card two-col">
-          <div>
-            <h2>Runtime Settings</h2>
-            {Object.entries(setupForm.settings).map(([k, v]) => (
-              <label className="field" key={k}><span>{k}</span><input value={v} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, [k]: e.target.value } })} /></label>
-            ))}
+      <div className="page setup-page">
+        <div className="setup-container">
+          <div className="setup-header">
+            <h1>🎬 DVDFlix Setup</h1>
+            <p>Configure Your Ripping System</p>
           </div>
-          <div>
-            <h2>System Profile</h2>
-            {Object.entries(setupForm.profile).map(([k, v]) => (
-              <label className="field" key={k}><span>{k}</span><input value={v} onChange={(e) => setSetupForm({ ...setupForm, profile: { ...setupForm.profile, [k]: e.target.value } })} /></label>
-            ))}
+
+          <div className="setup-card">
+            <h2>Admin Account</h2>
+            <div className="form-group">
+              <label>Username</label>
+              <input value={setupForm.username} onChange={(e) => setSetupForm({ ...setupForm, username: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input type="password" value={setupForm.password} onChange={(e) => setSetupForm({ ...setupForm, password: e.target.value })} />
+            </div>
           </div>
-        </section>
-        <section className="card"><button onClick={initializeSetup}>Complete Setup</button>{message && <p>{message}</p>}</section>
+
+          <div className="setup-cards-row">
+            <div className="setup-card">
+              <h2>🔧 Runtime Settings</h2>
+              <div className="form-group">
+                <label>Movies Path</label>
+                <input value={setupForm.settings.MOVIES_PATH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, MOVIES_PATH: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>TV Path</label>
+                <input value={setupForm.settings.TV_PATH} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TV_PATH: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>TMDB API Key</label>
+                <input type="password" value={setupForm.settings.TMDB_API_KEY} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, TMDB_API_KEY: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Drives</label>
+                <input value={setupForm.settings.DRIVES} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, DRIVES: e.target.value } })} />
+              </div>
+            </div>
+
+            <div className="setup-card">
+              <h2>🌐 Ollama Settings</h2>
+              <div className="form-group">
+                <label>Ollama URL</label>
+                <input value={setupForm.settings.OLLAMA_URL} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OLLAMA_URL: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Ollama Model</label>
+                <input value={setupForm.settings.OLLAMA_MODEL} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OLLAMA_MODEL: e.target.value } })} />
+              </div>
+              <div className="form-group">
+                <label>Confidence Threshold</label>
+                <input type="number" min="0" max="100" value={setupForm.settings.IDENTIFY_MIN_CONFIDENCE} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, IDENTIFY_MIN_CONFIDENCE: e.target.value } })} />
+              </div>
+            </div>
+          </div>
+
+          <button className="btn-primary full-width" onClick={initializeSetup}>
+            Complete Setup
+          </button>
+          {message && <div className={`alert alert-${messageType}`}>{message}</div>}
+        </div>
       </div>
     )
   }
 
+  // Login
   if (!token) {
     return (
-      <div className="page">
-        <header className="hero"><h1>DVDFlix Login</h1></header>
-        <section className="card">
-          <label className="field"><span>Username</span><input value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} /></label>
-          <label className="field"><span>Password</span><input type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} /></label>
-          <button onClick={login}>Log In</button>
-          {message && <p>{message}</p>}
-        </section>
+      <div className="page setup-page">
+        <div className="setup-container">
+          <div className="setup-header">
+            <h1>🔐 DVDFlix Login</h1>
+            <p>Enter your credentials</p>
+          </div>
+
+          <div className="setup-card">
+            <div className="form-group">
+              <label>Username</label>
+              <input value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
+            </div>
+            <button className="btn-primary full-width" onClick={login}>
+              Log In
+            </button>
+            {message && <div className={`alert alert-${messageType}`}>{message}</div>}
+          </div>
+        </div>
       </div>
     )
   }
 
+  // Main App
   return (
-    <div className="page">
-      <header className="hero topbar">
-        <div>
-          <h1>DVDFlix</h1>
-          <p>Self-hosted DVD operations console</p>
+    <div className="page main-app">
+      <header className="top-bar">
+        <div className="top-bar-left">
+          <h1>🎬 DVDFlix</h1>
         </div>
-        <div className="top-actions">
-          <button className="ghost" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'} Mode</button>
-          <button onClick={startAll}>Start All Drives</button>
+        <div className="top-bar-center">
+          <nav className="nav-tabs">
+            {pages.map((p) => (
+              <button
+                key={p}
+                className={`nav-tab ${activePage === p ? 'active' : ''}`}
+                onClick={() => setActivePage(p)}
+              >
+                {p === 'dashboard' && '📊 Dashboard'}
+                {p === 'ripper-status' && '⚙️ Ripper'}
+                {p === 'settings' && '⚡ Settings'}
+                {p === 'library' && '📚 Library'}
+              </button>
+            ))}
+          </nav>
+        </div>
+        <div className="top-bar-right">
+          <button className="btn-icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
       </header>
 
-      <nav className="tabs">
-        {pages.map((p) => (
-          <button key={p} className={activePage === p ? 'tab active' : 'tab'} onClick={() => setActivePage(p)}>{p[0].toUpperCase() + p.slice(1)}</button>
-        ))}
-      </nav>
+      {activePage === 'dashboard' && (
+        <div className="content">
+          <div className="grid-2 grid-gaps">
+            <div className="card">
+              <h2>🚀 Quick Actions</h2>
+              <button className="btn-primary full-width" onClick={startAll}>
+                Start All Drives
+              </button>
+              <div className="drive-buttons">
+                {(health?.drives || []).map((d) => (
+                  <button key={d} className="btn-secondary" onClick={() => startDrive(d)}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      {activePage === 'overview' && (
-        <section className="card two-col">
-          <div>
-            <h2>Runtime Snapshot</h2>
-            {health && (
-              <div className="kv-list">
-                <p><strong>Movies:</strong> {health.movies_path}</p>
-                <p><strong>TV:</strong> {health.tv_path}</p>
-                <p><strong>Drives:</strong> {health.drives.join(', ') || 'none'}</p>
+            <div className="card">
+              <h2>📍 System Info</h2>
+              <div className="info-list">
+                <div className="info-item">
+                  <span className="label">Movies Path</span>
+                  <span className="value">{health?.movies_path}</span>
+                </div>
+                <div className="info-item">
+                  <span className="label">TV Path</span>
+                  <span className="value">{health?.tv_path}</span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Active Drives</span>
+                  <span className="value">{health?.drives?.length || 0}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2>📋 Recent Jobs</h2>
+            {jobs.length === 0 ? (
+              <p className="empty-state">No jobs yet. Insert a disc to start.</p>
+            ) : (
+              <div className="jobs-list">
+                {jobs.slice(0, 10).map((job) => (
+                  <div key={job.id} className="job-item">
+                    <div className="job-header">
+                      <span className="job-drive">{job.drive}</span>
+                      <span className="job-title">{job.title || job.disc_label || 'Unknown'}</span>
+                      <span className="job-state" style={{ backgroundColor: jobStateColor(job.state) }}>
+                        {job.state}
+                      </span>
+                    </div>
+                    {job.error && <div className="job-error">⚠️ {job.error}</div>}
+                    {job.state === 'identifying' && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setOverrideModal({ jobId: job.id, jobTitle: job.title || job.disc_label })}
+                      >
+                        🔍 Search & Override
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
-            <div className="drive-grid">{(health?.drives || []).map((d) => <button key={d} onClick={() => startDrive(d)}>Start {d}</button>)}</div>
           </div>
-          <div>
-            <h2>Recent Jobs</h2>
-            {jobs.length === 0 && <p>No jobs yet.</p>}
-            {jobs.map((job) => <article key={job.id} className="job"><p><strong>{job.drive}</strong> - {job.state}</p><p>{job.title || job.disc_label || 'Unknown disc'}</p>{job.error && <p className="err">{job.error}</p>}</article>)}
-          </div>
-        </section>
+        </div>
       )}
 
-      {activePage === 'ripper' && (
-        <section className="card two-col">
-          <div>
-            <h2>Ripper Capabilities</h2>
-            {capabilities && (
-              <div className="status-grid">
-                <p>Overall Ready {boolBadge(capabilities.ripper_ready)}</p>
-                <p>lsdvd {boolBadge(capabilities.tools?.lsdvd)}</p>
-                <p>makemkvcon {boolBadge(capabilities.tools?.makemkvcon)}</p>
-                <p>eject {boolBadge(capabilities.tools?.eject)}</p>
-                {Object.entries(capabilities.drives || {}).map(([drive, ok]) => <p key={drive}>{drive} {boolBadge(ok)}</p>)}
+      {activePage === 'ripper-status' && (
+        <div className="content">
+          <div className="card">
+            <h2>🔧 Ripper Health</h2>
+            <div className="health-grid">
+              <div className="health-item">
+                <span className="label">Overall</span>
+                <span className={`badge ${capabilities?.ripper_ready ? 'ok' : 'bad'}`}>
+                  {capabilities?.ripper_ready ? '✓ Ready' : '✗ Issues'}
+                </span>
               </div>
-            )}
+              <div className="health-item">
+                <span className="label">lsdvd</span>
+                <span className={`badge ${capabilities?.tools?.lsdvd ? 'ok' : 'bad'}`}>
+                  {capabilities?.tools?.lsdvd ? '✓' : '✗'}
+                </span>
+              </div>
+              <div className="health-item">
+                <span className="label">makemkvcon</span>
+                <span className={`badge ${capabilities?.tools?.makemkvcon ? 'ok' : 'bad'}`}>
+                  {capabilities?.tools?.makemkvcon ? '✓' : '✗'}
+                </span>
+              </div>
+              <div className="health-item">
+                <span className="label">eject</span>
+                <span className={`badge ${capabilities?.tools?.eject ? 'ok' : 'bad'}`}>
+                  {capabilities?.tools?.eject ? '✓' : '✗'}
+                </span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h2>Diagnostics</h2>
-            <ul>{(capabilities?.issues || []).map((i) => <li key={i}>{i}</li>)}</ul>
-            <h3>Hints</h3>
-            <ul>{(capabilities?.hints || []).map((h) => <li key={h}>{h}</li>)}</ul>
-          </div>
-        </section>
-      )}
 
-      {activePage === 'profile' && (
-        <section className="card">
-          <h2>System Profile</h2>
-          {Object.entries(profileDraft || {}).map(([k, v]) => (
-            <label className="field" key={k}><span>{k}</span><input value={v || ''} onChange={(e) => setProfileDraft({ ...profileDraft, [k]: e.target.value })} /></label>
-          ))}
-          <button onClick={saveProfile}>Save System Profile</button>
-        </section>
+          {capabilities?.issues?.length > 0 && (
+            <div className="card card-warning">
+              <h2>⚠️ Issues</h2>
+              <ul>
+                {capabilities.issues.map((issue, i) => (
+                  <li key={i}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="card">
+            <h2>💡 Setup Hints</h2>
+            <ul className="hints-list">
+              {capabilities?.hints?.map((hint, i) => (
+                <li key={i}>{hint}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
 
       {activePage === 'settings' && (
-        <section className="card two-col">
-          <div>
-            <h2>Runtime Settings</h2>
-            {settingsDraft && Object.entries(settingsDraft).map(([k, v]) => (
-              <label className="field" key={k}><span>{k}</span><input value={v} onChange={(e) => setSettingsDraft({ ...settingsDraft, [k]: e.target.value })} /></label>
-            ))}
-            <button onClick={saveSettings}>Save Runtime Settings</button>
-            {message && <p>{message}</p>}
+        <div className="content">
+          <div className="card">
+            <h2>⚙️ Runtime Settings</h2>
+            {settingsDraft && (
+              <>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Movies Path</label>
+                    <input value={settingsDraft.MOVIES_PATH || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, MOVIES_PATH: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>TV Path</label>
+                    <input value={settingsDraft.TV_PATH || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TV_PATH: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>TMDB API Key</label>
+                    <input type="password" value={settingsDraft.TMDB_API_KEY || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, TMDB_API_KEY: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Confidence Threshold</label>
+                    <input type="number" min="0" max="100" value={settingsDraft.IDENTIFY_MIN_CONFIDENCE || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, IDENTIFY_MIN_CONFIDENCE: e.target.value })} />
+                  </div>
+                </div>
+                <button className="btn-primary" onClick={saveSettings}>
+                  Save Settings
+                </button>
+                {message && <div className={`alert alert-${messageType}`}>{message}</div>}
+              </>
+            )}
           </div>
-          <div>
-            <h2>Identification Pipeline</h2>
-            <ul>{pipelineStages.map((s) => <li key={s}>{s}</li>)}</ul>
-          </div>
-        </section>
+        </div>
       )}
 
       {activePage === 'library' && (
-        <section className="card two-col">
-          <div><h2>Movies</h2><ul>{library.movies.slice(0, 100).map((i) => <li key={i}>{i}</li>)}</ul></div>
-          <div><h2>TV Shows</h2><ul>{library.tvshows.slice(0, 100).map((i) => <li key={i}>{i}</li>)}</ul></div>
-        </section>
+        <div className="content">
+          <div className="grid-2">
+            <div className="card">
+              <h2>🎬 Movies ({library.movies.length})</h2>
+              <div className="file-list">
+                {library.movies.slice(0, 50).map((file, i) => (
+                  <div key={i} className="file-item">{file}</div>
+                ))}
+              </div>
+            </div>
+            <div className="card">
+              <h2>📺 TV Shows ({library.tvshows.length})</h2>
+              <div className="file-list">
+                {library.tvshows.slice(0, 50).map((file, i) => (
+                  <div key={i} className="file-item">{file}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
-  )
-}
+
+    {/* Manual Title Override Modal */}
+    {overrideModal && (
+      <div className="modal-overlay" onClick={() => setOverrideModal(null)}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>🔍 Search & Override Title</h2>
+            <button className="modal-close" onClick={() => setOverrideModal(null)}>✕</button>
+          </div>
+          
+          <div className="modal-body">
+            <p className="modal-subtitle">Current: <strong>{overrideModal.jobTitle}</strong></p>
+            
+            <div className="form-group">
+              <label>Search TMDB</label>
+              <div className="search-input-group">
+                <input
+                  type="text"
+                  placeholder="Search for title..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery.trim()) {
+                      searchTMDB(searchQuery.trim())
+                    }
+                  }}
+                />
+                <button
+                  className="btn-primary"
+                  onClick={() => searchQuery.trim() && searchTMDB(searchQuery.trim())}
+                  disabled={searching}
+                >
+                  {searching ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+            </div>
+
+            {searchResults.length > 0 && (
+              <div className="search-results">
+                <h3>Results:</h3>
+                {searchResults.map((result, idx) => (
+                  <div key={idx} className="search-result-item">
+                    <div className="result-info">
+                      <span className="result-title">{result.title}</span>
+                      <span className="result-year">{result.release_date?.substring(0, 4)}</span>
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        overrideJobTitle(
+                          overrideModal.jobId,
+                          result.title,
+                          result.release_date?.substring(0, 4) || '',
+                          'movie'
+                        )
+                      }
+                    >
+                      Select
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {searchQuery && !searching && searchResults.length === 0 && (
+              <p className="empty-state">No results found. Try a different search.</p>
+            )}
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn-secondary" onClick={() => setOverrideModal(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>

@@ -22,6 +22,18 @@ class TmdbClient:
         response.raise_for_status()
         return response.json().get("results", [])
 
+    def movie_details(self, movie_id: int) -> dict[str, Any] | None:
+        if not self.api_key:
+            return None
+        response = requests.get(
+            f"{self.base_url}/movie/{movie_id}",
+            params={"api_key": self.api_key},
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return None
+        return response.json()
+
 
 class OllamaClient:
     def __init__(self, base_url: str, model: str) -> None:
@@ -58,3 +70,70 @@ class OllamaClient:
             "year": parsed.get("year"),
             "confidence": float(parsed.get("confidence", 0.25)),
         }
+
+    def identify_from_disc_with_context(self, prompt: str) -> dict[str, Any]:
+        """
+        Multi-turn LLM judgment using expanded context (search results, metadata).
+        Useful for escalated/borderline identifications.
+        """
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json={"model": self.model, "prompt": prompt, "stream": False},
+            timeout=60,
+        )
+        response.raise_for_status()
+        text = response.json().get("response", "{}").strip()
+
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return {"title": "", "year": None, "confidence": 0}
+
+        try:
+            parsed = requests.models.complexjson.loads(match.group(0))
+        except ValueError:
+            return {"title": "", "year": None, "confidence": 0}
+
+        return {
+            "title": parsed.get("title") or "",
+            "year": parsed.get("year"),
+            "confidence": int(parsed.get("confidence", 0)) or 0,
+            "reasoning": parsed.get("reasoning", ""),
+        }
+
+    def chat_with_history(
+        self, system_prompt: str, messages: list[dict[str, str]], model: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Multi-turn conversation using Ollama's /api/chat endpoint.
+        Maintains full conversation history for contextual reasoning.
+        """
+        model = model or self.model
+        payload = {
+            "model": model,
+            "messages": [{"role": "system", "content": system_prompt}] + messages,
+            "stream": False,
+        }
+        response = requests.post(
+            f"{self.base_url}/api/chat",
+            json=payload,
+            timeout=90,
+        )
+        response.raise_for_status()
+        text = response.json().get("message", {}).get("content", "{}").strip()
+
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return {"title": "", "year": None, "confidence": 0}
+
+        try:
+            parsed = requests.models.complexjson.loads(match.group(0))
+        except ValueError:
+            return {"title": "", "year": None, "confidence": 0}
+
+        return {
+            "title": parsed.get("title") or "",
+            "year": parsed.get("year"),
+            "confidence": int(parsed.get("confidence", 0)) or 0,
+            "reasoning": parsed.get("reasoning", ""),
+        }
+

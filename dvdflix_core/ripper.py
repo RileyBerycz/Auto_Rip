@@ -25,3 +25,12 @@ def run_makemkv(drive: str, output_dir: Path) -> tuple[bool, str]:
     if proc.returncode != 0:
         return False, proc.stderr.strip() or proc.stdout.strip()
     return True, proc.stdout.strip()
+
+
+def eject_drive(drive: str) -> tuple[bool, str]:
+    """Eject optical drive. Used when identification fails or user rejects auto-identification."""
+    cmd = ["eject", drive]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        return False, proc.stderr.strip() or proc.stdout.strip()
+    return True, "Drive ejected successfully"

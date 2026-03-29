@@ -3,8 +3,13 @@ services:
     image: ${BACKEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-backend}:${IMAGE_TAG:-latest}
     pull_policy: always
     command: ["python", "-m", "backend.run"]
+    privileged: ${BACKEND_PRIVILEGED:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    devices:
+      - ${DRIVE_0:-/dev/sr0}:${DRIVE_0:-/dev/sr0}
+      - ${DRIVE_1:-/dev/sr1}:${DRIVE_1:-/dev/sr1}
+      - ${DRIVE_2:-/dev/sr2}:${DRIVE_2:-/dev/sr2}
     environment:
       - MOVIES_PATH
       - TV_PATH
@@ -22,17 +27,17 @@ services:
       - DISC_CACHE_DB
       - OPENSUBTITLES_API_KEY
       - ENABLE_WEB_SEARCH
-      - HSA_OVERRIDE_GFX_VERSION
       - SEARXNG_URL
       - HANDBRAKE_PRESET
+      - HSA_OVERRIDE_GFX_VERSION
       - FLASK_ENV
     ports:
       - "${BACKEND_PORT:-7272}:7272"
     volumes:
-      - dvdflix-data:/app/data
-      - dvdflix-movies:/media/movies
-      - dvdflix-tvshows:/media/tvshows
-      - dvdflix-temp:/media/tmp
+      - ${HOST_DATA_PATH:-./data}:/app/data
+      - ${HOST_MOVIES_PATH}:${MOVIES_PATH:-/media/movies}
+      - ${HOST_TV_PATH}:${TV_PATH:-/media/tvshows}
+      - ${HOST_TEMP_RIP_PATH}:${TEMP_RIP_PATH:-/media/tmp}
     healthcheck:
       test:
         - CMD
@@ -70,8 +75,33 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Searxng for superior metasearch during escalation
+  searxng:
+    image: searxng/searxng:latest
+    profiles: ["bundled-searxng"]
+    stdin_open: true
+    tty: true
+    ports:
+      - "8888:8888"
+    volumes:
+      - searxng:/etc/searxng
+    environment:
+      - SEARXNG_AUTOCOMPLETE=""
+      - SEARXNG_IMAGE_PROXY=false
+    restart: unless-stopped
+
+  # Optional bundled Ollama for all-in-one hosts.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["bundled-ollama"]
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
 volumes:
-  dvdflix-data:
-  dvdflix-movies:
-  dvdflix-tvshows:
-  dvdflix-temp:
+  ollama:
+  searxng:

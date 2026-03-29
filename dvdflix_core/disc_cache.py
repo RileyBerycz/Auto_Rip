@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -20,12 +21,28 @@ class DiscCache:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            # Main disc label to identification result cache
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS disc_cache (
                     disc_label TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            
+            # Disc hash tracking for deduplication and re-insertion detection
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS disc_history (
+                    disc_hash TEXT PRIMARY KEY,
+                    disc_label TEXT,
+                    title TEXT,
+                    year TEXT,
+                    media_type TEXT,
+                    ripped_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    notes TEXT
                 )
                 """
             )
@@ -60,3 +77,51 @@ class DiscCache:
                 """,
                 (disc_label, payload),
             )
+    
+    @staticmethod
+    def compute_disc_hash(disc_label: str, track_count: int, duration_seconds: int) -> str:
+        """
+        Compute a hash of disc metadata for deduplication.
+        Uses disc_label + track_count + total_duration as fingerprint.
+        """
+        fingerprint = f"{disc_label}:{track_count}:{duration_seconds}"
+        return hashlib.sha256(fingerprint.encode()).hexdigest()
+    
+    def record_disc_rip(
+        self, 
+        disc_hash: str, 
+        disc_label: str, 
+        title: str, 
+        year: str, 
+        media_type: str,
+        notes: str = ""
+    ) -> None:
+        """Record that a disc has been ripped to prevent re-ripping on re-insertion."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO disc_history (disc_hash, disc_label, title, year, media_type, notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (disc_hash, disc_label, title, year, media_type, notes),
+            )
+    
+    def has_been_ripped(self, disc_hash: str) -> dict[str, str] | None:
+        """Check if disc hash was previously ripped. Returns rip history or None."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT disc_label, title, year, media_type, ripped_at 
+                FROM disc_history WHERE disc_hash = ?
+                """,
+                (disc_hash,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "disc_label": row["disc_label"],
+            "title": row["title"],
+            "year": row["year"],
+            "media_type": row["media_type"],
+            "ripped_at": row["ripped_at"],
+        }

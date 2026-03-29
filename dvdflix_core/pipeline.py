@@ -24,6 +24,13 @@ class RipPipeline:
             ollama=OllamaClient(settings.ollama_url, settings.ollama_model),
             tmdb=TmdbClient(settings.tmdb_api_key),
             runtime_tolerance=settings.runtime_tolerance_minutes,
+            omdb_api_key=settings.omdb_api_key,
+            tvdb_api_key=settings.tvdb_api_key,
+            tvdb_pin=settings.tvdb_pin,
+            identify_min_confidence=settings.identify_min_confidence,
+            opensubtitles_api_key=settings.opensubtitles_api_key,
+            enable_web_search=settings.enable_web_search,
+            searxng_url=settings.searxng_url,
         )
         self.identify_lock = threading.Lock()
 

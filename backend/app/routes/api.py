@@ -46,11 +46,19 @@ def _runtime_settings_payload(payload: dict) -> dict[str, str]:
         "TEMP_RIP_PATH",
         "DRIVES",
         "TMDB_API_KEY",
+        "OMDB_API_KEY",
+        "TVDB_API_KEY",
+        "TVDB_PIN",
         "OLLAMA_URL",
         "OLLAMA_MODEL",
         "RUNTIME_TOLERANCE_MINUTES",
+        "IDENTIFY_MIN_CONFIDENCE",
         "MAX_IDENTIFY_WORKERS",
         "DISC_CACHE_DB",
+        "OPENSUBTITLES_API_KEY",
+        "ENABLE_WEB_SEARCH",
+        "SEARXNG_URL",
+        "HANDBRAKE_PRESET",
     ]
     result: dict[str, str] = {}
     for key in keys:
@@ -67,11 +75,19 @@ def _runtime_setting_keys() -> list[str]:
         "TEMP_RIP_PATH",
         "DRIVES",
         "TMDB_API_KEY",
+        "OMDB_API_KEY",
+        "TVDB_API_KEY",
+        "TVDB_PIN",
         "OLLAMA_URL",
         "OLLAMA_MODEL",
         "RUNTIME_TOLERANCE_MINUTES",
+        "IDENTIFY_MIN_CONFIDENCE",
         "MAX_IDENTIFY_WORKERS",
         "DISC_CACHE_DB",
+        "OPENSUBTITLES_API_KEY",
+        "ENABLE_WEB_SEARCH",
+        "SEARXNG_URL",
+        "HANDBRAKE_PRESET",
     ]
 
 
@@ -309,3 +325,59 @@ def library() -> tuple:
         ),
         200,
     )
+
+
+@api_bp.post("/jobs/<job_id>/override-title")
+@require_auth
+def override_job_title(job_id: str) -> tuple:
+    """
+    Manually override the title for a job.
+    Payload: { "title": "New Title", "year": "2024", "media_type": "movie|tv" }
+    """
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title", "")).strip()
+    year = str(payload.get("year", "")).strip()
+    media_type = str(payload.get("media_type", "movie")).strip()
+    
+    if not title:
+        return jsonify({"ok": False, "error": "title is required"}), 400
+    
+    job = _manager().get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "job not found"}), 404
+    
+    # Update job metadata
+    job["title"] = title
+    job["year"] = year
+    job["media_type"] = media_type
+    job["manual_override"] = True
+    job["confidence"] = 100
+    
+    _manager().update_job(job_id, job)
+    return jsonify({"ok": True}), 200
+
+
+@api_bp.post("/search/tmdb")
+@require_auth
+def search_tmdb() -> tuple:
+    """
+    Search TMDB for titles to help with manual overrides.
+    Payload: { "query": "The Matrix", "media_type": "movie|tv" }
+    """
+    from dvdflix_core.clients import TMDBClient
+    
+    payload = request.get_json(silent=True) or {}
+    query = str(payload.get("query", "")).strip()
+    media_type = str(payload.get("media_type", "movie")).strip()
+    
+    if not query:
+        return jsonify({"ok": False, "error": "query is required"}), 400
+    
+    manager = _manager()
+    tmdb = TMDBClient(api_key=manager.settings.tmdb_api_key)
+    
+    try:
+        results = tmdb.search(query, media_type)
+        return jsonify({"ok": True, "results": results}), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500

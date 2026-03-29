@@ -19,6 +19,14 @@ class Settings:
     runtime_tolerance_minutes: int = int(os.getenv("RUNTIME_TOLERANCE_MINUTES", "8"))
     max_identify_workers: int = int(os.getenv("MAX_IDENTIFY_WORKERS", "1"))
     disc_cache_db: Path = Path(os.getenv("DISC_CACHE_DB", "data/disc_cache.db"))
+    omdb_api_key: str = os.getenv("OMDB_API_KEY", "")
+    tvdb_api_key: str = os.getenv("TVDB_API_KEY", "")
+    tvdb_pin: str = os.getenv("TVDB_PIN", "")
+    identify_min_confidence: int = int(os.getenv("IDENTIFY_MIN_CONFIDENCE", "80"))
+    opensubtitles_api_key: str = os.getenv("OPENSUBTITLES_API_KEY", "")
+    enable_web_search: bool = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
+    searxng_url: str = os.getenv("SEARXNG_URL", "")
+    handbrake_preset: str = os.getenv("HANDBRAKE_PRESET", "default")
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, str] | None) -> "Settings":
@@ -45,6 +53,7 @@ class Settings:
         _set_path("disc_cache_db", "DISC_CACHE_DB")
         _set_int("runtime_tolerance_minutes", "RUNTIME_TOLERANCE_MINUTES")
         _set_int("max_identify_workers", "MAX_IDENTIFY_WORKERS")
+        _set_int("identify_min_confidence", "IDENTIFY_MIN_CONFIDENCE")
 
         drives = overrides.get("DRIVES")
         if drives is not None:
@@ -56,6 +65,20 @@ class Settings:
             settings.ollama_url = overrides["OLLAMA_URL"]
         if overrides.get("OLLAMA_MODEL"):
             settings.ollama_model = overrides["OLLAMA_MODEL"]
+        if overrides.get("OMDB_API_KEY") is not None:
+            settings.omdb_api_key = overrides.get("OMDB_API_KEY", "")
+        if overrides.get("TVDB_API_KEY") is not None:
+            settings.tvdb_api_key = overrides.get("TVDB_API_KEY", "")
+        if overrides.get("TVDB_PIN") is not None:
+            settings.tvdb_pin = overrides.get("TVDB_PIN", "")
+        if overrides.get("OPENSUBTITLES_API_KEY") is not None:
+            settings.opensubtitles_api_key = overrides.get("OPENSUBTITLES_API_KEY", "")
+        if overrides.get("ENABLE_WEB_SEARCH") is not None:
+            settings.enable_web_search = overrides.get("ENABLE_WEB_SEARCH", "").lower() == "true"
+        if overrides.get("SEARXNG_URL"):
+            settings.searxng_url = overrides["SEARXNG_URL"]
+        if overrides.get("HANDBRAKE_PRESET"):
+            settings.handbrake_preset = overrides["HANDBRAKE_PRESET"]
 
         return settings
 
@@ -71,6 +94,14 @@ class Settings:
             "RUNTIME_TOLERANCE_MINUTES": str(self.runtime_tolerance_minutes),
             "MAX_IDENTIFY_WORKERS": str(self.max_identify_workers),
             "DISC_CACHE_DB": str(self.disc_cache_db),
+            "OMDB_API_KEY": self.omdb_api_key,
+            "TVDB_API_KEY": self.tvdb_api_key,
+            "TVDB_PIN": self.tvdb_pin,
+            "IDENTIFY_MIN_CONFIDENCE": str(self.identify_min_confidence),
+            "OPENSUBTITLES_API_KEY": self.opensubtitles_api_key,
+            "ENABLE_WEB_SEARCH": "true" if self.enable_web_search else "false",
+            "SEARXNG_URL": self.searxng_url,
+            "HANDBRAKE_PRESET": self.handbrake_preset,
         }
 
     def ensure_dirs(self) -> None:
