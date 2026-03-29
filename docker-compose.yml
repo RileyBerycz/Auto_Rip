@@ -1,9 +1,7 @@
 services:
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    image: dvdflix-backend:local
+    image: ghcr.io/rileyberycz/dvdflix-backend:latest
+    pull_policy: always
     command: ["python", "-m", "backend.run"]
     privileged: true
     extra_hosts:

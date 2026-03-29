@@ -73,6 +73,7 @@ export default function App() {
   const [profileDraft, setProfileDraft] = useState({})
   const [capabilities, setCapabilities] = useState(null)
   const [health, setHealth] = useState(null)
+  const [driveStatus, setDriveStatus] = useState({ drives: [], summary: null })
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
   const [history, setHistory] = useState([])
@@ -123,7 +124,7 @@ export default function App() {
   }
 
   const fetchAuthedData = async () => {
-    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes] = await Promise.all([
+    const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes] = await Promise.all([
       fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
@@ -132,6 +133,7 @@ export default function App() {
       fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
       fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
+      fetch(`${apiUrl}/api/drives/status`, { headers: authHeaders }),
     ])
 
     if (healthRes.status === 401) {
@@ -144,6 +146,8 @@ export default function App() {
     setJobs((await jobsRes.json()).jobs || [])
     setLibrary(await libraryRes.json())
     setCapabilities(await capRes.json())
+    const drivesData = await drivesRes.json().catch(() => ({ drives: [], summary: null }))
+    setDriveStatus({ drives: drivesData?.drives || [], summary: drivesData?.summary || null })
 
     const settingsData = await settingsRes.json()
     if (settingsData?.settings) setSettingsDraft(settingsData.settings)
@@ -260,7 +264,23 @@ export default function App() {
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ drive }),
     })
-    showMessage(resp.ok ? `Started ${drive}` : 'Error', resp.ok ? 'success' : 'error')
+    const data = await resp.json().catch(() => ({}))
+    showMessage(resp.ok ? `Started ${drive}` : (data.error || `Failed to start ${drive}`), resp.ok ? 'success' : 'error')
+  }
+
+  const ejectSelectedDrive = async (drive) => {
+    const resp = await fetch(`${apiUrl}/api/drives/eject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ drive }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || data.message || `Failed to eject ${drive}`, 'error')
+      return
+    }
+    showMessage(data.message || `Ejected ${drive}`, 'success')
+    await fetchAuthedData()
   }
 
   const searchTMDB = async (query, mediaType = 'movie') => {
@@ -658,6 +678,35 @@ export default function App() {
             </div>
 
             <div className="card">
+              <h2>💿 Drive Bays</h2>
+              <div className="inline-actions" style={{ marginBottom: '10px' }}>
+                <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Drive Status</button>
+              </div>
+              {driveStatus.drives.length === 0 ? (
+                <p className="empty-state">No drives detected</p>
+              ) : (
+                <div className="drive-status-list">
+                  {driveStatus.drives.map((d) => (
+                    <div className="drive-status-item" key={d.drive}>
+                      <div>
+                        <div className="drive-status-title">{d.drive}</div>
+                        <div className="drive-status-meta">{d.detail}</div>
+                      </div>
+                      <div className="drive-status-actions">
+                        <span className={`badge ${d.status === 'ready' ? 'ok' : d.status === 'empty' ? 'warn' : 'bad'}`}>
+                          {d.status}
+                        </span>
+                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
+                          Eject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
               <h2>📍 System Info</h2>
               <div className="info-list">
                 <div className="info-item">
@@ -670,7 +719,11 @@ export default function App() {
                 </div>
                 <div className="info-item">
                   <span className="label">Active Drives</span>
-                  <span className="value">{health?.drives?.length || 0}</span>
+                  <span className="value">{driveStatus?.summary?.total ?? (health?.drives?.length || 0)}</span>
+                </div>
+                <div className="info-item">
+                  <span className="label">Drives With Disc</span>
+                  <span className="value">{driveStatus?.summary?.with_disc ?? 0}</span>
                 </div>
               </div>
             </div>
@@ -758,6 +811,35 @@ export default function App() {
                 <li key={i}>{hint}</li>
               ))}
             </ul>
+          </div>
+
+          <div className="card">
+            <h2>💽 Drive Status</h2>
+            <div className="inline-actions" style={{ marginBottom: '10px' }}>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh</button>
+            </div>
+            {driveStatus.drives.length === 0 ? (
+              <p className="empty-state">No drives detected.</p>
+            ) : (
+              <div className="drive-status-list">
+                {driveStatus.drives.map((d) => (
+                  <div className="drive-status-item" key={`status-${d.drive}`}>
+                    <div>
+                      <div className="drive-status-title">{d.drive}</div>
+                      <div className="drive-status-meta">{d.detail}</div>
+                    </div>
+                    <div className="drive-status-actions">
+                      <span className={`badge ${d.status === 'ready' ? 'ok' : d.status === 'empty' ? 'warn' : 'bad'}`}>
+                        {d.status}
+                      </span>
+                      <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
+                        Eject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -6,6 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _canonical_drive_key(path: str) -> str:
+    p = Path(path)
+    try:
+        return str(p.resolve(strict=False))
+    except OSError:
+        return str(p)
+
+
 def discover_optical_drives() -> list[str]:
     """Detect common Linux optical drive device nodes in stable order."""
     candidates = set(glob("/dev/sr*"))
@@ -13,8 +21,18 @@ def discover_optical_drives() -> list[str]:
         if Path(alias).exists():
             candidates.add(alias)
 
-    ordered = sorted(candidates)
-    return [d for d in ordered if Path(d).exists()]
+    canonical_to_drive: dict[str, str] = {}
+    for drive in sorted(candidates):
+        if not Path(drive).exists():
+            continue
+
+        key = _canonical_drive_key(drive)
+        current = canonical_to_drive.get(key)
+        # Prefer canonical /dev/sr* names over aliases like /dev/cdrom.
+        if current is None or (not current.startswith("/dev/sr") and drive.startswith("/dev/sr")):
+            canonical_to_drive[key] = drive
+
+    return sorted(canonical_to_drive.values())
 
 
 def parse_drives(value: str | None) -> list[str]:

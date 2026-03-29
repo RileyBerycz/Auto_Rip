@@ -541,6 +541,45 @@ button {
   color: var(--error);
 }
 
+.badge.warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
+.drive-status-list {
+  display: grid;
+  gap: 10px;
+}
+
+.drive-status-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.drive-status-title {
+  font-family: monospace;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.drive-status-meta {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: var(--ink-secondary);
+}
+
+.drive-status-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 /* File List */
 .file-list {
   display: grid;
@@ -830,6 +869,15 @@ button {
 
   .health-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .drive-status-item {
+    grid-template-columns: 1fr;
+  }
+
+  .drive-status-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 

@@ -5,19 +5,91 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 
 from flask_socketio import SocketIO
 
 from dvdflix_core import JobState, RipPipeline, Settings
+from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.models import RipJob
 
 
-def has_disc(drive: str) -> bool:
+def _canonical_drive_key(drive: str) -> str:
+    p = Path(drive)
+    try:
+        return str(p.resolve(strict=False))
+    except OSError:
+        return str(p)
+
+
+def probe_drive_status(drive: str) -> dict[str, str | bool]:
+    exists = Path(drive).exists()
+    if not exists:
+        return {
+            "drive": drive,
+            "exists": False,
+            "has_disc": False,
+            "readable": False,
+            "status": "missing",
+            "detail": "Drive device node not found",
+        }
+
     try:
         proc = subprocess.run(["lsdvd", "-q", drive], capture_output=True, text=True, check=False)
-        return proc.returncode == 0
+        stderr = (proc.stderr or "").strip()
+        lower = stderr.lower()
+        if proc.returncode == 0:
+            return {
+                "drive": drive,
+                "exists": True,
+                "has_disc": True,
+                "readable": True,
+                "status": "ready",
+                "detail": "Disc detected and readable",
+            }
+
+        if "no medium found" in lower or "can't open disc" in lower:
+            return {
+                "drive": drive,
+                "exists": True,
+                "has_disc": False,
+                "readable": False,
+                "status": "empty",
+                "detail": "Drive is empty",
+            }
+
+        if "no css library available" in lower or "encrypted dvd support unavailable" in lower:
+            return {
+                "drive": drive,
+                "exists": True,
+                "has_disc": True,
+                "readable": False,
+                "status": "encrypted",
+                "detail": "Encrypted disc present, lsdvd cannot read without libdvdcss",
+            }
+
+        return {
+            "drive": drive,
+            "exists": True,
+            "has_disc": False,
+            "readable": False,
+            "status": "error",
+            "detail": stderr or "Unknown lsdvd error",
+        }
     except FileNotFoundError:
-        return False
+        return {
+            "drive": drive,
+            "exists": exists,
+            "has_disc": False,
+            "readable": False,
+            "status": "tool-missing",
+            "detail": "lsdvd not installed",
+        }
+
+
+def has_disc(drive: str) -> bool:
+    status = probe_drive_status(drive)
+    return bool(status["has_disc"]) and bool(status["readable"])
 
 
 class JobManager:
@@ -99,6 +171,13 @@ class JobManager:
             if active and not active.done():
                 return {"ok": False, "error": f"Drive {drive} already busy"}
 
+        status = probe_drive_status(drive)
+        if not status.get("has_disc"):
+            return {"ok": False, "error": f"No disc detected in {drive}"}
+        if not status.get("readable"):
+            return {"ok": False, "error": f"{drive} has disc but is not readable by lsdvd ({status.get('status')})"}
+
+        with self.lock:
             future = self.executor.submit(self._run_pipeline_job, drive)
             self.inflight_by_drive[drive] = future
             return {"ok": True}
@@ -136,6 +215,34 @@ class JobManager:
 
                 self.start_job(drive)
             time.sleep(10)
+
+    def list_drive_statuses(self) -> list[dict[str, str | bool]]:
+        configured = list(self.settings.drives)
+        detected = discover_optical_drives()
+
+        merged = configured + [d for d in detected if d not in configured]
+        canonical_seen: set[str] = set()
+        statuses: list[dict[str, str | bool]] = []
+
+        for drive in merged:
+            key = _canonical_drive_key(drive)
+            if key in canonical_seen:
+                continue
+            canonical_seen.add(key)
+
+            item = probe_drive_status(drive)
+            in_config = drive in configured
+            in_detect = drive in detected
+            if in_config and in_detect:
+                source = "configured+detected"
+            elif in_config:
+                source = "configured"
+            else:
+                source = "detected"
+            item["source"] = source
+            statuses.append(item)
+
+        return statuses
 
     def shutdown(self) -> None:
         self._stop_event.set()

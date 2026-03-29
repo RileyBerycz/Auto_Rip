@@ -7,6 +7,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 
 from dvdflix_core.config import discover_optical_drives
+from dvdflix_core.ripper import eject_drive
 
 api_bp = Blueprint("api", __name__)
 
@@ -340,6 +341,44 @@ def health() -> tuple:
             "tv_path": str(manager.settings.tv_path),
         }
     ), 200
+
+
+@api_bp.get("/drives/status")
+@require_auth
+def drives_status() -> tuple:
+    statuses = _manager().list_drive_statuses()
+    total = len(statuses)
+    with_disc = sum(1 for d in statuses if d.get("has_disc"))
+    readable = sum(1 for d in statuses if d.get("readable"))
+    empty = sum(1 for d in statuses if d.get("status") == "empty")
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "drives": statuses,
+                "summary": {
+                    "total": total,
+                    "with_disc": with_disc,
+                    "readable": readable,
+                    "empty": empty,
+                },
+            }
+        ),
+        200,
+    )
+
+
+@api_bp.post("/drives/eject")
+@require_auth
+def drives_eject() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    drive = str(payload.get("drive", "")).strip()
+    if not drive:
+        return jsonify({"ok": False, "error": "drive is required"}), 400
+
+    ok, message = eject_drive(drive)
+    code = 200 if ok else 409
+    return jsonify({"ok": ok, "drive": drive, "message": message}), code
 
 
 @api_bp.get("/jobs")
