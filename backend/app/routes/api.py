@@ -786,6 +786,42 @@ def maintenance_rename_library() -> tuple:
     return jsonify({"ok": True, "task_ids": task_ids}), 202
 
 
+@api_bp.post("/maintenance/generate-nfos")
+@require_auth
+def maintenance_generate_nfos() -> tuple:
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "all")).strip().lower()
+
+    script_path = Path("/app/scripts/generate_nfo.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
+
+    targets: list[Path] = []
+    if scope in {"all", "movies"}:
+        targets.append(manager.settings.movies_path)
+    if scope in {"all", "tv"}:
+        targets.append(manager.settings.tv_path)
+    if not targets:
+        return jsonify({"ok": False, "error": "scope must be one of all|movies|tv"}), 400
+
+    task_ids: list[str] = []
+    for root in targets:
+        cmd = [
+            sys.executable,
+            "/app/scripts/generate_nfo.py",
+            "--root",
+            str(root),
+        ]
+        if manager.settings.tmdb_api_key:
+            cmd.extend(["--tmdb-key", manager.settings.tmdb_api_key])
+        task = _create_task("generate-nfos", cmd)
+        task_ids.append(task["id"])
+        _task_executor.submit(_run_task, task["id"])
+
+    return jsonify({"ok": True, "task_ids": task_ids}), 202
+
+
 @api_bp.post("/maintenance/tasks/<task_id>/cancel")
 @require_auth
 def maintenance_cancel_task(task_id: str) -> tuple:

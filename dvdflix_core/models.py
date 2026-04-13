@@ -49,6 +49,7 @@ class RipJob:
     disc_label: str = ""
     title: str = ""
     media_type: str = "movie"
+    year: int | None = None
     output_path: str = ""
     error: str = ""
     progress: int = 0
@@ -64,6 +65,7 @@ class RipJob:
             "disc_label": self.disc_label,
             "title": self.title,
             "media_type": self.media_type,
+            "year": self.year,
             "output_path": self.output_path,
             "error": self.error,
             "progress": self.progress,

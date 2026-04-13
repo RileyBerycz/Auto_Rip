@@ -101,7 +101,8 @@ class DiscIdentifier:
             pass
 
         try:
-            web_results = self.searcher.search_duckduckgo(f"{llm_guess.get('title', '')} movie", max_results=2)
+            # Use unified web search so SearxNG is preferred when configured.
+            web_results = self.searcher.search_web(f"{llm_guess.get('title', '')} movie", max_results=2)
             if web_results:
                 context_parts.append("Web search results:")
                 for res in web_results:

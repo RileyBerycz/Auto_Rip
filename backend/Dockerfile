@@ -8,6 +8,7 @@ RUN set -eux; \
             lsdvd \
             eject \
             handbrake-cli \
+            ffmpeg \
             ca-certificates \
             build-essential \
             automake \

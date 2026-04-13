@@ -77,6 +77,7 @@ class RipPipeline:
 
             job.title = identified.title
             job.media_type = identified.media_type
+            job.year = identified.year
             job.state = JobState.ripping
             job.updated_at = datetime.utcnow()
             if progress_cb:

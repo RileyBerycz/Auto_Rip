@@ -34,6 +34,29 @@ class TmdbClient:
             return None
         return response.json()
 
+    def search_tv(self, query: str) -> list[dict[str, Any]]:
+        if not self.api_key:
+            return []
+        response = requests.get(
+            f"{self.base_url}/search/tv",
+            params={"api_key": self.api_key, "query": query},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json().get("results", [])
+
+    def tv_details(self, tv_id: int) -> dict[str, Any] | None:
+        if not self.api_key:
+            return None
+        response = requests.get(
+            f"{self.base_url}/tv/{tv_id}",
+            params={"api_key": self.api_key, "append_to_response": "external_ids"},
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return None
+        return response.json()
+
 
 class OllamaClient:
     def __init__(self, base_url: str, model: str) -> None:

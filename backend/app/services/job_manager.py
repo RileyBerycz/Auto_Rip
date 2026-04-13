@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import threading
 import time
@@ -11,7 +13,9 @@ from flask_socketio import SocketIO
 
 from dvdflix_core import JobState, RipPipeline, Settings
 from dvdflix_core.config import discover_optical_drives
+from dvdflix_core.encoder import build_handbrake_command
 from dvdflix_core.models import RipJob
+from dvdflix_core.nfo import create_nfo_for_job
 from dvdflix_core.ripper import build_output_dir, eject_drive
 
 
@@ -117,6 +121,14 @@ class JobManager:
         self._stop_event = threading.Event()
         self.auto_eject_cooldown_seconds = 90
 
+        # Encode queue mirrors legacy script behavior: one encode worker, FIFO queue.
+        self.encode_executor = ThreadPoolExecutor(max_workers=1)
+        self.encode_queue_lock = threading.Lock()
+        self.encode_enqueued_paths: set[str] = set()
+        self.encode_pending_count_by_job: dict[str, int] = {}
+        self.encode_failed_count_by_job: dict[str, int] = {}
+        self.encode_suffix = ".x265.mkv"
+
         # Background monitor allows hands-off operation in the web app.
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
@@ -202,6 +214,7 @@ class JobManager:
                 return {"ok": False, "error": "job not found"}
             job.title = title
             job.media_type = media_type
+            job.year = year
             job.output_path = str(output_dir)
             job.state = JobState.complete
             job.error = ""
@@ -211,7 +224,174 @@ class JobManager:
             payload = job.to_dict()
 
         self._emit("job_update", payload)
+        self._queue_encode_for_job(job_id, source="manual-identification")
         return {"ok": True, "output_path": str(output_dir)}
+
+    def _set_job_encoding_started(self, job_id: str, queued_files: int, source: str) -> None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return
+            job.state = JobState.encoding
+            # Keep progress high so UI indicates rip done while encode is running.
+            job.progress = max(job.progress, 95)
+            self._append_job_log(
+                job,
+                f"Encoding queued ({queued_files} file(s), source={source})",
+            )
+            job.updated_at = datetime.utcnow()
+            payload = job.to_dict()
+        self._emit("job_update", payload)
+
+    def _queue_encode_for_job(self, job_id: str, source: str) -> None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job or not job.output_path:
+                return
+            output_root = Path(job.output_path)
+
+        if not output_root.exists() or not output_root.is_dir():
+            return
+        if not shutil.which("HandBrakeCLI"):
+            with self.lock:
+                job = self.jobs.get(job_id)
+                if not job:
+                    return
+                self._append_job_log(job, "Encoding skipped: HandBrakeCLI not available")
+                job.updated_at = datetime.utcnow()
+                payload = job.to_dict()
+            self._emit("job_update", payload)
+            return
+
+        mkv_files = sorted(p for p in output_root.rglob("*.mkv") if not p.name.endswith(self.encode_suffix))
+        if not mkv_files:
+            return
+
+        queued_count = 0
+        with self.encode_queue_lock:
+            for src in mkv_files:
+                src_abs = str(src.resolve(strict=False))
+                if src_abs in self.encode_enqueued_paths:
+                    continue
+                self.encode_enqueued_paths.add(src_abs)
+                self.encode_pending_count_by_job[job_id] = self.encode_pending_count_by_job.get(job_id, 0) + 1
+                queued_count += 1
+                self.encode_executor.submit(self._encode_file_for_job, job_id, src_abs)
+
+        if queued_count:
+            self._set_job_encoding_started(job_id, queued_count, source)
+
+    def _finalize_encode_state(self, job_id: str) -> None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return
+
+            pending = self.encode_pending_count_by_job.get(job_id, 0)
+            failed = self.encode_failed_count_by_job.get(job_id, 0)
+            if pending > 0:
+                return
+
+            self.encode_pending_count_by_job.pop(job_id, None)
+            self.encode_failed_count_by_job.pop(job_id, None)
+
+            if failed:
+                job.error = f"Encoding completed with {failed} failure(s). Check logs."
+                self._append_job_log(job, job.error)
+            else:
+                job.error = ""
+                self._append_job_log(job, "Encoding complete")
+
+            job.state = JobState.complete
+            job.progress = 100
+            job.updated_at = datetime.utcnow()
+            payload = job.to_dict()
+
+        self._emit("job_update", payload)
+
+    def _create_nfo_for_job(self, job_id: str) -> None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job or not job.output_path:
+                return
+            output_dir = Path(job.output_path)
+            self._append_job_log(job, "Postprocessing: generating metadata NFO")
+            job.state = JobState.postprocessing
+            job.updated_at = datetime.utcnow()
+            self._emit("job_update", job.to_dict())
+
+        ok = create_nfo_for_job(output_dir, job.title, job.media_type, job.year, self.settings.tmdb_api_key)
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return
+            if ok:
+                self._append_job_log(job, "NFO generated successfully")
+            else:
+                self._append_job_log(job, "NFO generation skipped or failed")
+            job.updated_at = datetime.utcnow()
+            self._emit("job_update", job.to_dict())
+
+    def _encode_file_for_job(self, job_id: str, src_abs: str) -> None:
+        src = Path(src_abs)
+        temp_out = src.with_name(f"{src.stem}.encoding-temp{src.suffix}")
+        failed = False
+
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job:
+                self._append_job_log(job, f"Encoding start: {src.name}")
+                job.updated_at = datetime.utcnow()
+                self._emit("job_update", job.to_dict())
+
+        try:
+            if not src.exists():
+                failed = True
+                raise FileNotFoundError(f"Source missing for encode: {src}")
+
+            if temp_out.exists():
+                temp_out.unlink(missing_ok=True)
+
+            cmd = build_handbrake_command(src, temp_out, preset=self.settings.handbrake_preset)
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                failed = True
+                msg = (proc.stderr or proc.stdout or "HandBrakeCLI failed").strip()
+                raise RuntimeError(msg)
+
+            # Replace original with encoded output, matching legacy script behavior.
+            try:
+                os.replace(str(temp_out), str(src))
+            except OSError:
+                if src.exists():
+                    src.unlink(missing_ok=True)
+                shutil.move(str(temp_out), str(src))
+
+            with self.lock:
+                job = self.jobs.get(job_id)
+                if job:
+                    self._append_job_log(job, f"Encoding done: {src.name}")
+                    job.updated_at = datetime.utcnow()
+                    self._emit("job_update", job.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            with self.lock:
+                job = self.jobs.get(job_id)
+                if job:
+                    self._append_job_log(job, f"Encoding failed for {src.name}: {exc}")
+                    job.updated_at = datetime.utcnow()
+                    self._emit("job_update", job.to_dict())
+        finally:
+            if temp_out.exists():
+                temp_out.unlink(missing_ok=True)
+
+            with self.encode_queue_lock:
+                self.encode_enqueued_paths.discard(src_abs)
+                pending = self.encode_pending_count_by_job.get(job_id, 0)
+                self.encode_pending_count_by_job[job_id] = max(0, pending - 1)
+                if failed:
+                    self.encode_failed_count_by_job[job_id] = self.encode_failed_count_by_job.get(job_id, 0) + 1
+
+            self._finalize_encode_state(job_id)
 
     def _append_job_log(self, job: RipJob, message: str) -> None:
         ts = datetime.utcnow().strftime("%H:%M:%S")
@@ -413,6 +593,9 @@ class JobManager:
             self.wait_media_change.add(drive_key)
 
         self._emit("job_update", job.to_dict())
+        if job.state == JobState.complete and job.output_path:
+            self._create_nfo_for_job(job.id)
+            self._queue_encode_for_job(job.id, source="auto-rip")
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -479,4 +662,5 @@ class JobManager:
 
     def shutdown(self) -> None:
         self._stop_event.set()
+        self.encode_executor.shutdown(wait=False)
         self.executor.shutdown(wait=False)
