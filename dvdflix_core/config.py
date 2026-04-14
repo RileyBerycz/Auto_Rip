@@ -6,6 +6,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _default_identify_workers() -> int:
+    cpus = os.cpu_count() or 1
+    return max(1, cpus // 2)
+
+
+def _parse_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 def _canonical_drive_key(path: str) -> str:
     p = Path(path)
     try:
@@ -61,8 +76,8 @@ def parse_drives(value: str | None) -> list[str]:
 
 @dataclass(slots=True)
 class Settings:
-    movies_path: Path = Path(os.getenv("MOVIES_PATH", "/media/dvdflix/movies"))
-    tv_path: Path = Path(os.getenv("TV_PATH", "/media/dvdflix/tvshows"))
+    movies_path: Path = Path(os.getenv("MOVIES_PATH", "/library/movies"))
+    tv_path: Path = Path(os.getenv("TV_PATH", "/library/tvshows"))
     temp_rip_path: Path = Path(os.getenv("TEMP_RIP_PATH", "/media/dvdflix/tmp"))
     drives: list[str] = field(
         default_factory=lambda: parse_drives(os.getenv("DRIVES"))
@@ -71,7 +86,7 @@ class Settings:
     ollama_url: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     runtime_tolerance_minutes: int = int(os.getenv("RUNTIME_TOLERANCE_MINUTES", "8"))
-    max_identify_workers: int = int(os.getenv("MAX_IDENTIFY_WORKERS", "1"))
+    max_identify_workers: int = _parse_int_env("MAX_IDENTIFY_WORKERS", _default_identify_workers())
     disc_cache_db: Path = Path(os.getenv("DISC_CACHE_DB", "data/disc_cache.db"))
     omdb_api_key: str = os.getenv("OMDB_API_KEY", "")
     tvdb_api_key: str = os.getenv("TVDB_API_KEY", "")

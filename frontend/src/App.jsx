@@ -38,9 +38,9 @@ export default function App() {
     username: '',
     password: '',
     settings: {
-      MOVIES_PATH: '/media/movies',
-      TV_PATH: '/media/tvshows',
-      TEMP_RIP_PATH: '/media/tmp',
+      MOVIES_PATH: '/library/movies',
+      TV_PATH: '/library/tvshows',
+      TEMP_RIP_PATH: '/media/dvdflix/tmp',
       DRIVES: '',
       TMDB_API_KEY: '',
       OMDB_API_KEY: '',
@@ -348,6 +348,21 @@ export default function App() {
     await fetchAuthedData()
   }
 
+  const runEncodeItem = async (scope, path) => {
+    const resp = await fetch(`${apiUrl}/api/maintenance/encode-item`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ scope, path, suffix: '.x265.mkv' }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || `Failed to queue encode for ${path}`, 'error')
+      return
+    }
+    showMessage(`Encode queued for ${path}`, 'success')
+    await fetchAuthedData()
+  }
+
   const runRenameLibrary = async () => {
     const resp = await fetch(`${apiUrl}/api/maintenance/rename-library`, {
       method: 'POST',
@@ -360,6 +375,21 @@ export default function App() {
       return
     }
     showMessage('Rename task queued', 'success')
+    await fetchAuthedData()
+  }
+
+  const runRenameItem = async (scope, path) => {
+    const resp = await fetch(`${apiUrl}/api/maintenance/rename-item`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ scope, path }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) {
+      showMessage(data.error || `Failed to queue rename for ${path}`, 'error')
+      return
+    }
+    showMessage(`Rename queued for ${path}`, 'success')
     await fetchAuthedData()
   }
 
@@ -1327,23 +1357,109 @@ export default function App() {
 
       {activePage === 'library' && (
         <div className="content">
-          <div className="grid-2">
-            <div className="card">
+          <div className="card" style={{ marginBottom: '16px' }}>
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <h2>📚 Media Library</h2>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Library</button>
+            </div>
+            <div className="info-list" style={{ marginTop: '12px' }}>
+              <div className="info-item">
+                <span className="label">Movies path</span>
+                <span className="value">{library.movies_path || 'n/a'}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">Movies path exists</span>
+                <span className="value">{library.movies_path_exists ? 'Yes' : 'No'}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">TV path</span>
+                <span className="value">{library.tv_path || 'n/a'}</span>
+              </div>
+              <div className="info-item">
+                <span className="label">TV path exists</span>
+                <span className="value">{library.tv_path_exists ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>🎬 Movies ({library.movies.length})</h2>
-              <div className="file-list">
-                {library.movies.slice(0, 50).map((file, i) => (
-                  <div key={i} className="file-item">{file}</div>
+              <button className="btn-secondary" onClick={runEncodeLibrary}>Batch encode movies</button>
+            </div>
+            {library.movies.length === 0 && !library.movies_path_exists ? (
+              <p className="empty-state">Movies path is not available in the container.</p>
+            ) : (
+              <div className="gallery-grid">
+                {library.movies.map((item, i) => (
+                  <div key={`${item.path}-${i}`} className="media-card">
+                    <div className="media-card-poster">
+                      {item.poster ? (
+                        <img src={item.poster} alt={`${item.title} poster`} />
+                      ) : (
+                        <div className="media-card-placeholder">No poster</div>
+                      )}
+                    </div>
+                    <div className="media-card-body">
+                      <div className="media-card-title-row">
+                        <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
+                        {item.needs_encode && <span className="badge badge-warning">Encode</span>}
+                        {item.needs_rename && <span className="badge badge-info">Rename</span>}
+                      </div>
+                      <p className="media-card-overview">{item.overview || item.path}</p>
+                      <div className="media-card-meta">
+                        <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
+                        {item.rating ? <span>★ {item.rating}</span> : null}
+                      </div>
+                      <div className="media-card-actions">
+                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)}>Encode</button>
+                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)}>Rename</button>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-            <div className="card">
+            )}
+          </div>
+
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📺 TV Shows ({library.tvshows.length})</h2>
-              <div className="file-list">
-                {library.tvshows.slice(0, 50).map((file, i) => (
-                  <div key={i} className="file-item">{file}</div>
+              <button className="btn-secondary" onClick={runRenameLibrary}>Batch rename TV shows</button>
+            </div>
+            {library.tvshows.length === 0 && !library.tv_path_exists ? (
+              <p className="empty-state">TV path is not available in the container.</p>
+            ) : (
+              <div className="gallery-grid">
+                {library.tvshows.map((item, i) => (
+                  <div key={`${item.path}-${i}`} className="media-card">
+                    <div className="media-card-poster">
+                      {item.poster ? (
+                        <img src={item.poster} alt={`${item.title} poster`} />
+                      ) : (
+                        <div className="media-card-placeholder">No poster</div>
+                      )}
+                    </div>
+                    <div className="media-card-body">
+                      <div className="media-card-title-row">
+                        <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
+                        {item.needs_encode && <span className="badge badge-warning">Encode</span>}
+                        {item.needs_rename && <span className="badge badge-info">Rename</span>}
+                      </div>
+                      <p className="media-card-overview">{item.overview || item.path}</p>
+                      <div className="media-card-meta">
+                        <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
+                        {item.rating ? <span>★ {item.rating}</span> : null}
+                      </div>
+                      <div className="media-card-actions">
+                        <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)}>Encode</button>
+                        <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)}>Rename</button>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
 
           <div className="card">

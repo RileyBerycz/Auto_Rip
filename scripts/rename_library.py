@@ -42,16 +42,16 @@ def _ollama_suggest_name(current_name: str, file_samples: list[str], base_url: s
     return None
 
 
-def rename_tree(root: Path) -> None:
+def rename_tree(root: Path, use_llm: bool) -> None:
     ollama_url = os.getenv("OLLAMA_URL", "").strip()
     ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
-    use_llm = bool(ollama_url)
+    should_use_llm = use_llm and bool(ollama_url)
 
     for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         current_name = path.name
         target_name = clean_name(current_name)
 
-        if use_llm and path.is_dir() and ("_" in current_name or "." in current_name or current_name.lower() != current_name):
+        if should_use_llm and path.is_dir() and ("_" in current_name or "." in current_name or current_name.lower() != current_name):
             sample_files = []
             try:
                 sample_files = [str(child.name) for child in sorted(path.iterdir()) if child.is_file()][:5]
@@ -71,12 +71,51 @@ def rename_tree(root: Path) -> None:
                     print(f"Skipped rename {path}: {exc}")
 
 
+def rename_path(target: Path, use_llm: bool) -> None:
+    if target.is_file():
+        current_name = target.name
+        target_name = clean_name(current_name)
+        if target_name != current_name:
+            new_path = target.with_name(target_name)
+            if not new_path.exists():
+                try:
+                    target.rename(new_path)
+                    print(f"Renamed: {target} -> {new_path}")
+                except OSError as exc:
+                    print(f"Skipped rename {target}: {exc}")
+        return
+
+    rename_tree(target, use_llm=use_llm)
+    current_name = target.name
+    target_name = clean_name(current_name)
+    if target_name != current_name:
+        new_path = target.with_name(target_name)
+        if not new_path.exists():
+            try:
+                target.rename(new_path)
+                print(f"Renamed: {target} -> {new_path}")
+            except OSError as exc:
+                print(f"Skipped rename {target}: {exc}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Normalize naming in media library.")
-    parser.add_argument("--root", required=True, help="Library root path")
+    parser.add_argument("--root", help="Library root path")
+    parser.add_argument("--path", help="Specific file or folder to rename")
+    parser.add_argument("--use-llm", action="store_true", help="Use Ollama-assisted rename suggestions")
     args = parser.parse_args()
 
-    rename_tree(Path(args.root))
+    if not args.root and not args.path:
+        parser.error("Either --root or --path must be provided")
+
+    if args.path:
+        target = Path(args.path)
+        if not target.exists():
+            print(f"Path not found: {target}")
+            return
+        rename_path(target, use_llm=args.use_llm)
+    else:
+        rename_tree(Path(args.root), use_llm=args.use_llm)
 
 
 if __name__ == "__main__":

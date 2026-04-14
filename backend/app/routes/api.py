@@ -13,6 +13,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 
 from dvdflix_core.config import discover_optical_drives
+from dvdflix_core.library import discover_media_items
 from dvdflix_core.ripper import eject_drive
 
 api_bp = Blueprint("api", __name__)
@@ -33,6 +34,17 @@ def _tool_exists(tool_cmd: str) -> bool:
 
 def _manager():
     return current_app.extensions["job_manager"]
+
+
+def _resolve_library_path(root: Path, path_value: str) -> Path:
+    if not path_value:
+        raise ValueError("path is required")
+    candidate = Path(path_value)
+    root_resolved = root.resolve(strict=False)
+    target = candidate.resolve(strict=False) if candidate.is_absolute() else (root_resolved / candidate).resolve(strict=False)
+    if target != root_resolved and root_resolved not in target.parents:
+        raise ValueError("path must be inside the library root")
+    return target
 
 
 def _append_task_log(task: dict, message: str) -> None:
@@ -535,16 +547,17 @@ def cleanup_job_output(job_id: str) -> tuple:
 def library() -> tuple:
     manager = _manager()
 
-    def scan(root: Path) -> list[str]:
-        if not root.exists():
-            return []
-        return sorted(str(p.relative_to(root)) for p in root.rglob("*.mkv"))
-
+    movies_path = manager.settings.movies_path
+    tv_path = manager.settings.tv_path
     return (
         jsonify(
             {
-                "movies": scan(manager.settings.movies_path),
-                "tvshows": scan(manager.settings.tv_path),
+                "movies": discover_media_items(movies_path, "movie", manager.settings.tmdb_api_key),
+                "tvshows": discover_media_items(tv_path, "tv", manager.settings.tmdb_api_key),
+                "movies_path": str(movies_path),
+                "movies_path_exists": movies_path.exists(),
+                "tv_path": str(tv_path),
+                "tv_path_exists": tv_path.exists(),
             }
         ),
         200,
@@ -752,6 +765,46 @@ def maintenance_encode_library() -> tuple:
     return jsonify({"ok": True, "task_ids": task_ids}), 202
 
 
+@api_bp.post("/maintenance/encode-item")
+@require_auth
+def maintenance_encode_item() -> tuple:
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "movies")).strip().lower()
+    rel_path = str(payload.get("path", "")).strip()
+    suffix = str(payload.get("suffix", ".x265.mkv")).strip() or ".x265.mkv"
+
+    if scope not in {"movies", "tv"}:
+        return jsonify({"ok": False, "error": "scope must be movies or tv"}), 400
+
+    root = manager.settings.movies_path if scope == "movies" else manager.settings.tv_path
+    try:
+        target = _resolve_library_path(root, rel_path)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if not target.exists():
+        return jsonify({"ok": False, "error": f"path not found: {target}"}), 404
+
+    script_path = Path("/app/scripts/encode_library.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
+    if not shutil.which("HandBrakeCLI"):
+        return jsonify({"ok": False, "error": "HandBrakeCLI is not installed in backend image"}), 500
+
+    cmd = [
+        sys.executable,
+        "/app/scripts/encode_library.py",
+        "--path",
+        str(target),
+        "--suffix",
+        suffix,
+    ]
+    task = _create_task("encode-item", cmd)
+    _task_executor.submit(_run_task, task["id"])
+    return jsonify({"ok": True, "task_id": task["id"]}), 202
+
+
 @api_bp.post("/maintenance/rename-library")
 @require_auth
 def maintenance_rename_library() -> tuple:
@@ -784,6 +837,44 @@ def maintenance_rename_library() -> tuple:
         _task_executor.submit(_run_task, task["id"])
 
     return jsonify({"ok": True, "task_ids": task_ids}), 202
+
+
+@api_bp.post("/maintenance/rename-item")
+@require_auth
+def maintenance_rename_item() -> tuple:
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "movies")).strip().lower()
+    rel_path = str(payload.get("path", "")).strip()
+    use_llm = bool(payload.get("use_llm", False))
+
+    if scope not in {"movies", "tv"}:
+        return jsonify({"ok": False, "error": "scope must be movies or tv"}), 400
+
+    root = manager.settings.movies_path if scope == "movies" else manager.settings.tv_path
+    try:
+        target = _resolve_library_path(root, rel_path)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if not target.exists():
+        return jsonify({"ok": False, "error": f"path not found: {target}"}), 404
+
+    script_path = Path("/app/scripts/rename_library.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
+
+    cmd = [
+        sys.executable,
+        "/app/scripts/rename_library.py",
+        "--path",
+        str(target),
+    ]
+    if use_llm:
+        cmd.append("--use-llm")
+    task = _create_task("rename-item", cmd)
+    _task_executor.submit(_run_task, task["id"])
+    return jsonify({"ok": True, "task_id": task["id"]}), 202
 
 
 @api_bp.post("/maintenance/generate-nfos")
