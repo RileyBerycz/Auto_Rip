@@ -333,11 +333,11 @@ export default function App() {
     await fetchAuthedData()
   }
 
-  const runEncodeLibrary = async () => {
+  const runEncodeLibrary = async (scope = 'all') => {
     const resp = await fetch(`${apiUrl}/api/maintenance/encode-library`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ scope: maintenanceScope, suffix: '.x265.mkv' }),
+      body: JSON.stringify({ scope, suffix: '.x265.mkv' }),
     })
     const data = await resp.json().catch(() => ({}))
     if (!resp.ok) {
@@ -1341,6 +1341,26 @@ export default function App() {
                     </select>
                   </div>
                   <div className="form-group">
+                    <label>DVD HandBrake Preset</label>
+                    <select value={settingsDraft.HANDBRAKE_PRESET_DVD || 'default'} onChange={(e) => setSettingsDraft({ ...settingsDraft, HANDBRAKE_PRESET_DVD: e.target.value })}>
+                      <option value="default">default</option>
+                      <option value="standard">standard</option>
+                      <option value="high">high</option>
+                      <option value="fast">fast</option>
+                      <option value="ultrafast">ultrafast</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Blu-ray HandBrake Preset</label>
+                    <select value={settingsDraft.HANDBRAKE_PRESET_BLURAY || 'high'} onChange={(e) => setSettingsDraft({ ...settingsDraft, HANDBRAKE_PRESET_BLURAY: e.target.value })}>
+                      <option value="default">default</option>
+                      <option value="standard">standard</option>
+                      <option value="high">high</option>
+                      <option value="fast">fast</option>
+                      <option value="ultrafast">ultrafast</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
                     <label>MakeMKV Command Path</label>
                     <input value={settingsDraft.MAKEMKVCON_PATH || 'makemkvcon'} onChange={(e) => setSettingsDraft({ ...settingsDraft, MAKEMKVCON_PATH: e.target.value })} />
                   </div>
@@ -1360,7 +1380,10 @@ export default function App() {
           <div className="card" style={{ marginBottom: '16px' }}>
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📚 Media Library</h2>
-              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Library</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Library</button>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('all')}>Batch encode all</button>
+              </div>
             </div>
             <div className="info-list" style={{ marginTop: '12px' }}>
               <div className="info-item">
@@ -1385,7 +1408,7 @@ export default function App() {
           <div className="card">
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>🎬 Movies ({library.movies.length})</h2>
-              <button className="btn-secondary" onClick={runEncodeLibrary}>Batch encode movies</button>
+              <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')}>Batch encode movies</button>
             </div>
             {library.movies.length === 0 && !library.movies_path_exists ? (
               <p className="empty-state">Movies path is not available in the container.</p>
@@ -1425,7 +1448,10 @@ export default function App() {
           <div className="card" style={{ marginTop: '16px' }}>
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📺 TV Shows ({library.tvshows.length})</h2>
-              <button className="btn-secondary" onClick={runRenameLibrary}>Batch rename TV shows</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')}>Batch encode TV shows</button>
+                <button className="btn-secondary" onClick={runRenameLibrary}>Batch rename TV shows</button>
+              </div>
             </div>
             {library.tvshows.length === 0 && !library.tv_path_exists ? (
               <p className="empty-state">TV path is not available in the container.</p>

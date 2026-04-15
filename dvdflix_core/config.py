@@ -96,6 +96,8 @@ class Settings:
     enable_web_search: bool = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
     searxng_url: str = os.getenv("SEARXNG_URL", "")
     handbrake_preset: str = os.getenv("HANDBRAKE_PRESET", "default")
+    handbrake_preset_dvd: str = os.getenv("HANDBRAKE_PRESET_DVD", "default")
+    handbrake_preset_bluray: str = os.getenv("HANDBRAKE_PRESET_BLURAY", "high")
     makemkvcon_path: str = os.getenv("MAKEMKVCON_PATH", "makemkvcon")
 
     @classmethod
@@ -149,6 +151,10 @@ class Settings:
             settings.searxng_url = overrides["SEARXNG_URL"]
         if overrides.get("HANDBRAKE_PRESET"):
             settings.handbrake_preset = overrides["HANDBRAKE_PRESET"]
+        if overrides.get("HANDBRAKE_PRESET_DVD") is not None:
+            settings.handbrake_preset_dvd = overrides["HANDBRAKE_PRESET_DVD"]
+        if overrides.get("HANDBRAKE_PRESET_BLURAY") is not None:
+            settings.handbrake_preset_bluray = overrides["HANDBRAKE_PRESET_BLURAY"]
         if overrides.get("MAKEMKVCON_PATH"):
             settings.makemkvcon_path = overrides["MAKEMKVCON_PATH"]
 
@@ -174,6 +180,8 @@ class Settings:
             "ENABLE_WEB_SEARCH": "true" if self.enable_web_search else "false",
             "SEARXNG_URL": self.searxng_url,
             "HANDBRAKE_PRESET": self.handbrake_preset,
+            "HANDBRAKE_PRESET_DVD": self.handbrake_preset_dvd,
+            "HANDBRAKE_PRESET_BLURAY": self.handbrake_preset_bluray,
             "MAKEMKVCON_PATH": self.makemkvcon_path,
         }
 

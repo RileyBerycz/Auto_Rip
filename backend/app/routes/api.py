@@ -173,6 +173,8 @@ def _runtime_settings_payload(payload: dict) -> dict[str, str]:
         "ENABLE_WEB_SEARCH",
         "SEARXNG_URL",
         "HANDBRAKE_PRESET",
+        "HANDBRAKE_PRESET_DVD",
+        "HANDBRAKE_PRESET_BLURAY",
         "MAKEMKVCON_PATH",
     ]
     result: dict[str, str] = {}
@@ -203,6 +205,8 @@ def _runtime_setting_keys() -> list[str]:
         "ENABLE_WEB_SEARCH",
         "SEARXNG_URL",
         "HANDBRAKE_PRESET",
+        "HANDBRAKE_PRESET_DVD",
+        "HANDBRAKE_PRESET_BLURAY",
         "MAKEMKVCON_PATH",
     ]
 
@@ -723,7 +727,28 @@ def update_history(disc_hash: str) -> tuple:
 def maintenance_tasks() -> tuple:
     with _task_lock:
         ordered = sorted(_tasks.values(), key=lambda x: x.get("updated_at", ""), reverse=True)
-    return jsonify({"ok": True, "tasks": ordered[:50]}), 200
+
+    manager = _manager()
+    library_tasks = []
+    for job in manager.list_jobs():
+        if job.get("drive"):
+            continue
+        if not job.get("title", "").lower().startswith("library encode"):
+            continue
+        library_tasks.append(
+            {
+                "id": job["id"],
+                "kind": "library-encode",
+                "state": job["state"],
+                "title": job.get("title", ""),
+                "output_path": job.get("output_path", ""),
+                "logs": job.get("logs", []),
+                "updated_at": job.get("updated_at", ""),
+            }
+        )
+
+    combined = sorted(ordered + library_tasks, key=lambda x: x.get("updated_at", ""), reverse=True)
+    return jsonify({"ok": True, "tasks": combined[:50]}), 200
 
 
 @api_bp.post("/maintenance/encode-library")
@@ -732,37 +757,10 @@ def maintenance_encode_library() -> tuple:
     manager = _manager()
     payload = request.get_json(silent=True) or {}
     scope = str(payload.get("scope", "all")).strip().lower()
-    suffix = str(payload.get("suffix", ".x265.mkv")).strip() or ".x265.mkv"
 
-    script_path = Path("/app/scripts/encode_library.py")
-    if not script_path.exists():
-        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
-    if not shutil.which("HandBrakeCLI"):
-        return jsonify({"ok": False, "error": "HandBrakeCLI is not installed in backend image"}), 500
-
-    targets: list[Path] = []
-    if scope in {"all", "movies"}:
-        targets.append(manager.settings.movies_path)
-    if scope in {"all", "tv"}:
-        targets.append(manager.settings.tv_path)
-    if not targets:
-        return jsonify({"ok": False, "error": "scope must be one of all|movies|tv"}), 400
-
-    task_ids: list[str] = []
-    for root in targets:
-        cmd = [
-            sys.executable,
-            "/app/scripts/encode_library.py",
-            "--root",
-            str(root),
-            "--suffix",
-            suffix,
-        ]
-        task = _create_task("encode-library", cmd)
-        task_ids.append(task["id"])
-        _task_executor.submit(_run_task, task["id"])
-
-    return jsonify({"ok": True, "task_ids": task_ids}), 202
+    result = manager.queue_library_encode(scope)
+    status = 202 if result.get("ok") else 400
+    return jsonify(result), status
 
 
 @api_bp.post("/maintenance/encode-item")
@@ -772,7 +770,6 @@ def maintenance_encode_item() -> tuple:
     payload = request.get_json(silent=True) or {}
     scope = str(payload.get("scope", "movies")).strip().lower()
     rel_path = str(payload.get("path", "")).strip()
-    suffix = str(payload.get("suffix", ".x265.mkv")).strip() or ".x265.mkv"
 
     if scope not in {"movies", "tv"}:
         return jsonify({"ok": False, "error": "scope must be movies or tv"}), 400
@@ -783,26 +780,9 @@ def maintenance_encode_item() -> tuple:
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 
-    if not target.exists():
-        return jsonify({"ok": False, "error": f"path not found: {target}"}), 404
-
-    script_path = Path("/app/scripts/encode_library.py")
-    if not script_path.exists():
-        return jsonify({"ok": False, "error": f"missing script: {script_path}"}), 500
-    if not shutil.which("HandBrakeCLI"):
-        return jsonify({"ok": False, "error": "HandBrakeCLI is not installed in backend image"}), 500
-
-    cmd = [
-        sys.executable,
-        "/app/scripts/encode_library.py",
-        "--path",
-        str(target),
-        "--suffix",
-        suffix,
-    ]
-    task = _create_task("encode-item", cmd)
-    _task_executor.submit(_run_task, task["id"])
-    return jsonify({"ok": True, "task_id": task["id"]}), 202
+    result = manager.queue_library_encode_item(target, scope)
+    status = 202 if result.get("ok") else 400
+    return jsonify(result), status
 
 
 @api_bp.post("/maintenance/rename-library")

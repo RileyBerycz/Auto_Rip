@@ -28,13 +28,21 @@ def main() -> None:
         if target.is_file():
             candidates = [target]
         else:
-            candidates = sorted([p for p in target.rglob("*.mkv") if not p.name.endswith(args.suffix)])
+            candidates = sorted(
+                (p for p in target.rglob("*.mkv") if not p.name.endswith(args.suffix)),
+                key=lambda p: p.stat().st_size,
+                reverse=True,
+            )
     else:
         root = Path(args.root)
         if not root.exists():
             print(f"Root not found: {root}")
             return
-        candidates = sorted([p for p in root.rglob("*.mkv") if not p.name.endswith(args.suffix)])
+        candidates = sorted(
+            (p for p in root.rglob("*.mkv") if not p.name.endswith(args.suffix)),
+            key=lambda p: p.stat().st_size,
+            reverse=True,
+        )
 
     if not candidates:
         print("No MKV files found to encode.")

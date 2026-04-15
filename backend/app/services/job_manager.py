@@ -13,7 +13,7 @@ from flask_socketio import SocketIO
 
 from dvdflix_core import JobState, RipPipeline, Settings
 from dvdflix_core.config import discover_optical_drives
-from dvdflix_core.encoder import build_handbrake_command
+from dvdflix_core.encoder import build_handbrake_command, get_video_resolution
 from dvdflix_core.models import RipJob
 from dvdflix_core.nfo import create_nfo_for_job
 from dvdflix_core.ripper import build_output_dir, eject_drive
@@ -250,7 +250,7 @@ class JobManager:
                 return
             output_root = Path(job.output_path)
 
-        if not output_root.exists() or not output_root.is_dir():
+        if not output_root.exists():
             return
         if not shutil.which("HandBrakeCLI"):
             with self.lock:
@@ -259,12 +259,27 @@ class JobManager:
                     return
                 self._append_job_log(job, "Encoding skipped: HandBrakeCLI not available")
                 job.updated_at = datetime.utcnow()
-                payload = job.to_dict()
-            self._emit("job_update", payload)
+                self._emit("job_update", job.to_dict())
             return
 
-        mkv_files = sorted(p for p in output_root.rglob("*.mkv") if not p.name.endswith(self.encode_suffix))
+        if output_root.is_file():
+            mkv_files = [output_root] if output_root.suffix.lower() == ".mkv" else []
+        else:
+            mkv_files = sorted(
+                (p for p in output_root.rglob("*.mkv") if not p.name.endswith(self.encode_suffix)),
+                key=lambda p: p.stat().st_size,
+                reverse=True,
+            )
+
         if not mkv_files:
+            with self.lock:
+                job = self.jobs.get(job_id)
+                if job:
+                    self._append_job_log(job, f"No MKV files found to encode at {output_root}")
+                    job.state = JobState.complete
+                    job.progress = 100
+                    job.updated_at = datetime.utcnow()
+                    self._emit("job_update", job.to_dict())
             return
 
         queued_count = 0
@@ -280,6 +295,77 @@ class JobManager:
 
         if queued_count:
             self._set_job_encoding_started(job_id, queued_count, source)
+
+    def _get_handbrake_preset_for_path(self, src: Path) -> str:
+        try:
+            _, height = get_video_resolution(src)
+            if height <= 720:
+                return self.settings.handbrake_preset_dvd or self.settings.handbrake_preset
+        except Exception:
+            pass
+        return self.settings.handbrake_preset_bluray or self.settings.handbrake_preset
+
+    def queue_library_encode(self, scope: str) -> dict:
+        if scope not in {"all", "movies", "tv"}:
+            return {"ok": False, "error": "scope must be one of all|movies|tv"}
+
+        targets: list[Path] = []
+        if scope in {"all", "movies"}:
+            targets.append(self.settings.movies_path)
+        if scope in {"all", "tv"}:
+            targets.append(self.settings.tv_path)
+        if not targets:
+            return {"ok": False, "error": "scope must be one of all|movies|tv"}
+
+        task_ids: list[str] = []
+        for root in targets:
+            if not root.exists():
+                continue
+            job_id = str(uuid.uuid4())
+            job = RipJob(
+                id=job_id,
+                drive="",
+                state=JobState.pending,
+                title=f"Library encode ({scope})",
+                media_type="movie" if root == self.settings.movies_path else "tv",
+                output_path=str(root),
+            )
+            with self.lock:
+                self.jobs[job_id] = job
+            self._queue_encode_for_job(job_id, source=f"library-encode:{scope}")
+            task_ids.append(job_id)
+
+        if not task_ids:
+            return {"ok": False, "error": "No valid library roots found to encode"}
+
+        return {"ok": True, "job_ids": task_ids}
+
+    def queue_library_encode_item(self, path: Path, scope: str) -> dict:
+        if scope not in {"movies", "tv"}:
+            return {"ok": False, "error": "scope must be movies or tv"}
+
+        if not path.exists():
+            return {"ok": False, "error": f"path not found: {path}"}
+
+        root = self.settings.movies_path if scope == "movies" else self.settings.tv_path
+        resolved_root = root.resolve(strict=False)
+        resolved_path = path.resolve(strict=False)
+        if resolved_root != resolved_path and resolved_root not in resolved_path.parents:
+            return {"ok": False, "error": f"path must be inside {resolved_root}"}
+
+        job_id = str(uuid.uuid4())
+        job = RipJob(
+            id=job_id,
+            drive="",
+            state=JobState.pending,
+            title=f"Library encode item ({scope})",
+            media_type=scope,
+            output_path=str(path),
+        )
+        with self.lock:
+            self.jobs[job_id] = job
+        self._queue_encode_for_job(job_id, source=f"library-encode-item:{scope}")
+        return {"ok": True, "job_id": job_id}
 
     def _finalize_encode_state(self, job_id: str) -> None:
         with self.lock:
@@ -352,7 +438,8 @@ class JobManager:
             if temp_out.exists():
                 temp_out.unlink(missing_ok=True)
 
-            cmd = build_handbrake_command(src, temp_out, preset=self.settings.handbrake_preset)
+            preset = self._get_handbrake_preset_for_path(src)
+            cmd = build_handbrake_command(src, temp_out, preset=preset)
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 failed = True

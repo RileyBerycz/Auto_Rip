@@ -14,7 +14,7 @@ def _ffprobe_stream_info(src: Path) -> dict[str, Any]:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height",
+        "stream=codec_name,width,height",
         "-of",
         "json",
         str(src),
@@ -36,6 +36,35 @@ def get_video_resolution(src: Path) -> tuple[int, int]:
     if width is None or height is None:
         raise RuntimeError(f"Video resolution missing in {src}")
     return int(width), int(height)
+
+
+def get_video_codec(src: Path) -> str | None:
+    info = _ffprobe_stream_info(src)
+    streams = info.get("streams", [])
+    if not streams:
+        return None
+    codec_name = streams[0].get("codec_name")
+    return str(codec_name).lower() if codec_name else None
+
+
+def get_video_duration_seconds(src: Path) -> float | None:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(src),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        return float(proc.stdout.strip())
+    except ValueError:
+        return None
 
 
 def _normalize_even(value: int) -> int:
