@@ -682,7 +682,6 @@ class JobManager:
         self._emit("job_update", job.to_dict())
         if job.state == JobState.complete and job.output_path:
             self._create_nfo_for_job(job.id)
-            self._queue_encode_for_job(job.id, source="auto-rip")
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():

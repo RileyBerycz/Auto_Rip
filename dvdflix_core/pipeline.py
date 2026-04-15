@@ -132,64 +132,15 @@ class RipPipeline:
                             f"Rip complete to temp: {temp_output_dir}. Awaiting manual identification.",
                         )
                 else:
-                    # ------------------------------------------------------------------
-                    # Encode ripped MKVs with HandBrake, then move to library.
-                    # ------------------------------------------------------------------
-                    job.state = JobState.encoding
-                    job.updated_at = datetime.utcnow()
+                    job.state = JobState.ripping
                     if progress_cb:
-                        progress_cb(JobState.encoding.value, 80, "Encoding with HandBrake…")
+                        progress_cb(JobState.ripping.value, 75, f"Moving ripped files to library…")
 
-                    encode_dir = self.settings.temp_rip_path / f"{job.id[:8]}_encoded"
-                    encode_dir.mkdir(parents=True, exist_ok=True)
-
-                    encode_errors: list[str] = []
-                    mkv_files = sorted(temp_output_dir.glob("*.mkv"))
-
-                    if mkv_files:
-                        for idx, src_mkv in enumerate(mkv_files, 1):
-                            if should_cancel and should_cancel():
-                                job.state = JobState.canceled
-                                job.error = "Cancelled during encoding"
-                                shutil.rmtree(temp_output_dir, ignore_errors=True)
-                                shutil.rmtree(encode_dir, ignore_errors=True)
-                                if progress_cb:
-                                    progress_cb(JobState.canceled.value, 100, "Cancelled during encoding")
-                                job.updated_at = datetime.utcnow()
-                                return job
-
-                            dst_mkv = encode_dir / src_mkv.name
-                            pct = 80 + int((idx / len(mkv_files)) * 15)
-                            if progress_cb:
-                                progress_cb(JobState.encoding.value, pct, f"Encoding {src_mkv.name} ({idx}/{len(mkv_files)})")
-
-                            ok, msg = encode_file(src_mkv, dst_mkv, preset=self.settings.handbrake_preset)
-                            if not ok:
-                                encode_errors.append(f"{src_mkv.name}: {msg}")
-                    else:
-                        # No MKV files — nothing to encode; fall back to moving originals.
-                        encode_errors.append("No MKV files found after rip; copying originals.")
-                        for child in temp_output_dir.iterdir():
-                            shutil.copy2(str(child), str(encode_dir / child.name))
-
-                    # Clean up raw rip regardless of encode outcome.
-                    shutil.rmtree(temp_output_dir, ignore_errors=True)
-
-                    if encode_errors and mkv_files:
-                        # Partial or full encode failure — leave encoded dir for manual rescue.
-                        job.state = JobState.failed
-                        job.error = "; ".join(encode_errors)
-                        job.output_path = str(encode_dir)
-                        if progress_cb:
-                            progress_cb(JobState.failed.value, 100, f"Encode errors: {job.error}")
-                        job.updated_at = datetime.utcnow()
-                        return job
-
-                    # Move encoded (or fallback) files to library.
                     output_dir = build_output_dir(target_root, identified.title, identified.year)
-                    for child in encode_dir.iterdir():
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    for child in temp_output_dir.iterdir():
                         shutil.move(str(child), str(output_dir / child.name))
-                    shutil.rmtree(encode_dir, ignore_errors=True)
+                    shutil.rmtree(temp_output_dir, ignore_errors=True)
 
                     job.state = JobState.complete
                     job.output_path = str(output_dir)

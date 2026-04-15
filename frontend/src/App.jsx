@@ -81,6 +81,11 @@ export default function App() {
   const [tempFiles, setTempFiles] = useState({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } })
   const [maintenanceTasks, setMaintenanceTasks] = useState([])
   const [maintenanceScope, setMaintenanceScope] = useState('all')
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false)
+  const [maintenanceAction, setMaintenanceAction] = useState('')
+  const [setupLoading, setSetupLoading] = useState(false)
+  const [authedLoading, setAuthedLoading] = useState(false)
+  const [authedLoaded, setAuthedLoaded] = useState(false)
   const [history, setHistory] = useState([])
   const [accounts, setAccounts] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
@@ -113,9 +118,11 @@ export default function App() {
   const refreshSetupStatus = async () => {
     if (setupRefreshInFlight.current) return
     setupRefreshInFlight.current = true
+    setSetupLoading(true)
     if (!apiUrl) {
       showMessage('Backend URL is required', 'error')
       setupRefreshInFlight.current = false
+      setSetupLoading(false)
       return
     }
     try {
@@ -132,6 +139,7 @@ export default function App() {
       setSetupError(`Cannot reach ${apiUrl}: ${err.message}`)
     } finally {
       setupRefreshInFlight.current = false
+      setSetupLoading(false)
     }
   }
 
@@ -139,6 +147,7 @@ export default function App() {
     if (!token || !apiUrl) return
     if (authedRefreshInFlight.current) return
     authedRefreshInFlight.current = true
+    setAuthedLoading(true)
     try {
       const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes, tempRes, maintenanceRes] = await Promise.all([
         fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
@@ -188,10 +197,12 @@ export default function App() {
       const accountsData = await accountsRes.json()
       setAccounts(accountsData?.users || [])
       setCurrentUser(accountsData?.current_user || null)
+      setAuthedLoaded(true)
     } catch {
       // Background polling should be resilient; manual actions surface explicit errors.
     } finally {
       authedRefreshInFlight.current = false
+      setAuthedLoading(false)
     }
   }
 
@@ -233,6 +244,8 @@ export default function App() {
     const nextSocket = (socketUrlInput || '').trim().replace(/\/$/, '')
     setApiUrl(nextApi)
     setSocketUrl(nextSocket)
+    setSetupError('')
+    setSetupLoading(true)
     localStorage.setItem('dvdflix_api_url', nextApi)
     localStorage.setItem('dvdflix_socket_url', nextSocket)
   }
@@ -334,63 +347,107 @@ export default function App() {
   }
 
   const runEncodeLibrary = async (scope = 'all') => {
-    const resp = await fetch(`${apiUrl}/api/maintenance/encode-library`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ scope, suffix: '.x265.mkv' }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      showMessage(data.error || 'Failed to queue encode task', 'error')
+    if (maintenanceBusy) {
+      showMessage('Already queueing a maintenance action. Please wait.', 'info')
       return
     }
-    showMessage('Encode task queued', 'success')
-    await fetchAuthedData()
+    setMaintenanceBusy(true)
+    setMaintenanceAction(`Queueing encode ${scope}`)
+    try {
+      const resp = await fetch(`${apiUrl}/api/maintenance/encode-library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ scope, suffix: '.x265.mkv' }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        showMessage(data.error || 'Failed to queue encode task', 'error')
+        return
+      }
+      showMessage(`Encode task queued successfully for ${scope}`, 'success')
+      await fetchAuthedData()
+    } finally {
+      setMaintenanceBusy(false)
+      setMaintenanceAction('')
+    }
   }
 
   const runEncodeItem = async (scope, path) => {
-    const resp = await fetch(`${apiUrl}/api/maintenance/encode-item`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ scope, path, suffix: '.x265.mkv' }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      showMessage(data.error || `Failed to queue encode for ${path}`, 'error')
+    if (maintenanceBusy) {
+      showMessage('Already processing a maintenance action. Please wait.', 'info')
       return
     }
-    showMessage(`Encode queued for ${path}`, 'success')
-    await fetchAuthedData()
+    setMaintenanceBusy(true)
+    setMaintenanceAction(`Queueing encode item`)
+    try {
+      const resp = await fetch(`${apiUrl}/api/maintenance/encode-item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ scope, path, suffix: '.x265.mkv' }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        showMessage(data.error || `Failed to queue encode for ${path}`, 'error')
+        return
+      }
+      showMessage(`Encode queued for ${path}`, 'success')
+      await fetchAuthedData()
+    } finally {
+      setMaintenanceBusy(false)
+      setMaintenanceAction('')
+    }
   }
 
-  const runRenameLibrary = async () => {
-    const resp = await fetch(`${apiUrl}/api/maintenance/rename-library`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ scope: maintenanceScope }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      showMessage(data.error || 'Failed to queue rename task', 'error')
+  const runRenameLibrary = async (scope = maintenanceScope) => {
+    if (maintenanceBusy) {
+      showMessage('Already processing a maintenance action. Please wait.', 'info')
       return
     }
-    showMessage('Rename task queued', 'success')
-    await fetchAuthedData()
+    setMaintenanceBusy(true)
+    setMaintenanceAction(`Queueing rename ${scope}`)
+    try {
+      const resp = await fetch(`${apiUrl}/api/maintenance/rename-library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ scope }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        showMessage(data.error || 'Failed to queue rename task', 'error')
+        return
+      }
+      showMessage(`Rename task queued successfully for ${scope}`, 'success')
+      await fetchAuthedData()
+    } finally {
+      setMaintenanceBusy(false)
+      setMaintenanceAction('')
+    }
   }
 
   const runRenameItem = async (scope, path) => {
-    const resp = await fetch(`${apiUrl}/api/maintenance/rename-item`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ scope, path }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      showMessage(data.error || `Failed to queue rename for ${path}`, 'error')
+    if (maintenanceBusy) {
+      showMessage('Already processing a maintenance action. Please wait.', 'info')
       return
     }
-    showMessage(`Rename queued for ${path}`, 'success')
-    await fetchAuthedData()
+    setMaintenanceBusy(true)
+    setMaintenanceAction('Queueing rename item')
+    try {
+      const resp = await fetch(`${apiUrl}/api/maintenance/rename-item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ scope, path }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        showMessage(data.error || `Failed to queue rename for ${path}`, 'error')
+        return
+      }
+      showMessage(`Rename queued for ${path}`, 'success')
+      await fetchAuthedData()
+    } finally {
+      setMaintenanceBusy(false)
+      setMaintenanceAction('')
+    }
   }
 
   const startAll = async () => {
@@ -523,11 +580,18 @@ export default function App() {
       case 'canceled': return '#64748b'
       case 'identifying': return '#3b82f6'
       case 'pending': return '#6b7280'
+      case 'queued': return '#7c3aed'
+      case 'running': return '#4338ca'
       default: return '#999'
     }
   }
 
-  const isJobActive = (state) => ['pending', 'identifying', 'ripping', 'encoding', 'postprocessing'].includes(state)
+  const isJobActive = (state) => ['queued', 'running', 'pending', 'identifying', 'ripping', 'encoding', 'postprocessing'].includes(state)
+
+  const maintenanceButtonLabel = (defaultLabel, actionName) => {
+    if (!maintenanceBusy) return defaultLabel
+    return maintenanceAction === actionName ? `${defaultLabel}…` : 'Processing…'
+  }
 
   const driveStatusTone = (status) => {
     if (status === 'ready' || status === 'encrypted') return 'ok'
@@ -597,13 +661,44 @@ export default function App() {
     return [...ripLogs, ...taskLogs].slice(-1000)
   }, [jobs, maintenanceTasks])
 
+  const dashboardItems = useMemo(() => {
+    const itemMap = new Map()
+    ;(jobs || []).forEach((job) => {
+      itemMap.set(job.id, {
+        ...job,
+        kind: job.drive ? 'rip' : 'job',
+      })
+    })
+
+    ;(maintenanceTasks || []).forEach((task) => {
+      if (itemMap.has(task.id)) return
+      itemMap.set(task.id, {
+        id: task.id,
+        drive: '',
+        title: task.title || task.kind,
+        state: task.state || 'queued',
+        progress: Number(task.progress || (task.state === 'complete' ? 100 : task.state === 'failed' ? 100 : task.state === 'running' ? 50 : 0)),
+        logs: task.logs || [],
+        error: task.error || '',
+        output_path: task.output_path || '',
+        kind: 'maintenance',
+        taskKind: task.kind,
+        updated_at: task.updated_at,
+      })
+    })
+
+    return Array.from(itemMap.values()).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+  }, [jobs, maintenanceTasks])
+
+  const activeDashboardCount = dashboardItems.filter((item) => isJobActive(item.state)).length
+
   // Connection Setup Page
   if (!setupStatus) {
     return (
       <div className="page setup-page">
         <div className="setup-container">
           <div className="setup-header">
-            <h1>🎬 DVDFlix</h1>
+            <h1>🎬 DvDRip</h1>
             <p>Self-hosted DVD Operations Console</p>
           </div>
           
@@ -627,9 +722,10 @@ export default function App() {
                 onChange={(e) => setSocketUrlInput(e.target.value)}
               />
             </div>
-            <button className="btn-primary" onClick={applyBackendUrls}>
-              Connect
+            <button className="btn-primary" onClick={applyBackendUrls} disabled={setupLoading}>
+              {setupLoading ? 'Connecting…' : 'Connect'}
             </button>
+            {setupLoading && <div className="alert alert-info">Connecting to backend…</div>}
             {setupError && <div className="alert alert-error">{setupError}</div>}
           </div>
         </div>
@@ -643,7 +739,7 @@ export default function App() {
       <div className="page setup-page">
         <div className="setup-container">
           <div className="setup-header">
-            <h1>🎬 DVDFlix Setup</h1>
+            <h1>🎬 DvDRip Setup</h1>
             <p>Configure Your Ripping System</p>
           </div>
 
@@ -818,7 +914,7 @@ export default function App() {
       <div className="page setup-page">
         <div className="setup-container">
           <div className="setup-header">
-            <h1>🔐 DVDFlix Login</h1>
+            <h1>🔐 DvDRip Login</h1>
             <p>Enter your credentials</p>
           </div>
 
@@ -846,7 +942,7 @@ export default function App() {
     <div className="page main-app">
       <header className="top-bar">
         <div className="top-bar-left">
-          <h1>🎬 DVDFlix</h1>
+          <h1>🎬 DvDRip</h1>
         </div>
         <div className="top-bar-center">
           <nav className="nav-tabs">
@@ -914,7 +1010,7 @@ export default function App() {
                 </div>
                 <div className="info-item">
                   <span className="label">Active Jobs</span>
-                  <span className="value">{jobs.filter((j) => isJobActive(j.state)).length}</span>
+                  <span className="value">{activeDashboardCount}</span>
                 </div>
               </div>
             </div>
@@ -922,18 +1018,19 @@ export default function App() {
 
           <div className="card">
             <h2>📋 Recent Jobs</h2>
-            {jobs.length === 0 ? (
-              <p className="empty-state">No jobs yet. Insert a disc to start.</p>
+            {dashboardItems.length === 0 ? (
+              <p className="empty-state">No jobs yet. Insert a disc or queue maintenance tasks.</p>
             ) : (
               <div className="jobs-list">
-                {jobs.slice(0, 6).map((job) => (
+                {dashboardItems.slice(0, 8).map((job) => (
                   <div key={job.id} className="job-item">
                     <div className="job-header">
-                      <span className="job-drive">{job.drive}</span>
+                      <span className="job-drive">{job.drive || (job.kind === 'maintenance' ? job.taskKind || 'maintenance' : 'system')}</span>
                       <span className="job-title">{job.title || job.disc_label || 'Unknown'}</span>
                       <span className="job-state" style={{ backgroundColor: jobStateColor(job.state) }}>
                         {job.state}
                       </span>
+                      {job.kind === 'maintenance' && <span className="badge badge-info" style={{ marginLeft: '8px' }}>Maintenance</span>}
                     </div>
                     <div className="job-progress-wrap">
                       <div className="job-progress-bar">
@@ -1381,10 +1478,27 @@ export default function App() {
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📚 Media Library</h2>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Library</button>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('all')}>Batch encode all</button>
+                <button className="btn-secondary" onClick={fetchAuthedData} disabled={authedLoading}>
+                  {authedLoading ? 'Refreshing…' : 'Refresh Library'}
+                </button>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('all')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch encode all', 'Queueing encode all')}
+                </button>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('all')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch rename all', 'Queueing rename all')}
+                </button>
               </div>
             </div>
+            {authedLoading && !maintenanceBusy && (
+              <div className="alert alert-info" style={{ marginTop: '12px' }}>
+                Loading library data…
+              </div>
+            )}
+            {maintenanceBusy && (
+              <div className="alert alert-info" style={{ marginTop: '12px' }}>
+                {maintenanceAction || 'Maintenance action in progress...'}
+              </div>
+            )}
             <div className="info-list" style={{ marginTop: '12px' }}>
               <div className="info-item">
                 <span className="label">Movies path</span>
@@ -1408,10 +1522,15 @@ export default function App() {
           <div className="card">
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>🎬 Movies ({library.movies.length})</h2>
-              <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')}>Batch encode movies</button>
+              <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
+              </button>
+              <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
+              </button>
             </div>
             {library.movies.length === 0 && !library.movies_path_exists ? (
-              <p className="empty-state">Movies path is not available in the container.</p>
+              <p className="empty-state">{authedLoading ? 'Loading movies…' : 'Movies path is not available in the container.'}</p>
             ) : (
               <div className="gallery-grid">
                 {library.movies.map((item, i) => (
@@ -1435,8 +1554,12 @@ export default function App() {
                         {item.rating ? <span>★ {item.rating}</span> : null}
                       </div>
                       <div className="media-card-actions">
-                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)}>Encode</button>
-                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)}>Rename</button>
+                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading}>
+                          {maintenanceButtonLabel('Encode', 'Queueing encode item')}
+                        </button>
+                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading}>
+                          {maintenanceButtonLabel('Rename', 'Queueing rename item')}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1449,12 +1572,16 @@ export default function App() {
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📺 TV Shows ({library.tvshows.length})</h2>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')}>Batch encode TV shows</button>
-                <button className="btn-secondary" onClick={runRenameLibrary}>Batch rename TV shows</button>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch encode TV shows', 'Queueing encode tv')}
+                </button>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch rename TV shows', 'Queueing rename tv')}
+                </button>
               </div>
             </div>
             {library.tvshows.length === 0 && !library.tv_path_exists ? (
-              <p className="empty-state">TV path is not available in the container.</p>
+              <p className="empty-state">{authedLoading ? 'Loading TV shows…' : 'TV path is not available in the container.'}</p>
             ) : (
               <div className="gallery-grid">
                 {library.tvshows.map((item, i) => (
@@ -1478,8 +1605,12 @@ export default function App() {
                         {item.rating ? <span>★ {item.rating}</span> : null}
                       </div>
                       <div className="media-card-actions">
-                        <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)}>Encode</button>
-                        <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)}>Rename</button>
+                        <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
+                          {maintenanceButtonLabel('Encode', 'Queueing encode item')}
+                        </button>
+                        <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
+                          {maintenanceButtonLabel('Rename', 'Queueing rename item')}
+                        </button>
                       </div>
                     </div>
                   </div>

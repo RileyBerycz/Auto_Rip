@@ -1,4 +1,4 @@
-# DVDFlix
+# DvDRip
 
 Self-hosted DVD ripping and media management system with both a standalone curses daemon and a web app.
 
