@@ -115,6 +115,11 @@ export default function App() {
     setTimeout(() => setMessage(''), 5000)
   }
 
+  const driveButtonLabel = (defaultLabel, actionName) => {
+    if (!driveBusy) return defaultLabel
+    return driveAction === actionName ? `${defaultLabel}…` : 'Working…'
+  }
+
   const refreshSetupStatus = async () => {
     if (setupRefreshInFlight.current) return
     setupRefreshInFlight.current = true
@@ -149,54 +154,36 @@ export default function App() {
     authedRefreshInFlight.current = true
     setAuthedLoading(true)
     try {
-      const [healthRes, jobsRes, libraryRes, capRes, settingsRes, profileRes, historyRes, accountsRes, drivesRes, tempRes, maintenanceRes] = await Promise.all([
-        fetch(`${apiUrl}/api/health`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/jobs`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/library`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/capabilities`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/settings`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/profile`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/history?limit=500`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/accounts`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/drives/status`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/temp-files`, { headers: authHeaders }),
-        fetch(`${apiUrl}/api/maintenance/tasks`, { headers: authHeaders }),
-      ])
-
-      if (healthRes.status === 401) {
+      const resp = await fetch(`${apiUrl}/api/dashboard`, { headers: authHeaders })
+      if (resp.status === 401) {
         setToken('')
         localStorage.removeItem('dvdflix_token')
         return
       }
+      const data = await resp.json().catch(() => null)
+      if (!resp.ok || !data?.ok) {
+        return
+      }
 
-      setHealth(await healthRes.json())
-      setJobs((await jobsRes.json()).jobs || [])
-      setLibrary(await libraryRes.json())
-      setCapabilities(await capRes.json())
-      const drivesData = await drivesRes.json().catch(() => ({ drives: [], summary: null }))
-      setDriveStatus({ drives: drivesData?.drives || [], summary: drivesData?.summary || null })
-      const tempData = await tempRes.json().catch(() => ({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } }))
+      setHealth(data.health || null)
+      setJobs(data.jobs || [])
+      setLibrary(data.library || { movies: [], tvshows: [] })
+      setCapabilities(data.capabilities || null)
+      setDriveStatus(data.drives || { drives: [], summary: null })
+      const tempData = data.temp_files || { root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } }
       setTempFiles({
-        root: tempData?.root || '',
-        exists: !!tempData?.exists,
-        entries: tempData?.entries || [],
-        summary: tempData?.summary || { count: 0, file_count: 0, total_bytes: 0 },
+        root: tempData.root || '',
+        exists: !!tempData.exists,
+        entries: tempData.entries || [],
+        summary: tempData.summary || { count: 0, file_count: 0, total_bytes: 0 },
       })
-      const maintenanceData = await maintenanceRes.json().catch(() => ({ tasks: [] }))
-      setMaintenanceTasks(maintenanceData?.tasks || [])
+      setMaintenanceTasks((data.maintenance && data.maintenance.tasks) || [])
 
-      const settingsData = await settingsRes.json()
-      if (settingsData?.settings) setSettingsDraft(settingsData.settings)
-
-      const profileData = await profileRes.json()
-      if (profileData?.profile) setProfileDraft(profileData.profile)
-
-      const historyData = await historyRes.json()
-      setHistory(historyData?.history || [])
-
-      const accountsData = await accountsRes.json()
-      setAccounts(accountsData?.users || [])
-      setCurrentUser(accountsData?.current_user || null)
+      if (data.settings?.settings) setSettingsDraft(data.settings.settings)
+      if (data.profile?.profile) setProfileDraft(data.profile.profile)
+      setHistory((data.history && data.history.history) || [])
+      setAccounts((data.accounts && data.accounts.users) || [])
+      setCurrentUser(data.accounts?.current_user || null)
       setAuthedLoaded(true)
     } catch {
       // Background polling should be resilient; manual actions surface explicit errors.
@@ -214,11 +201,18 @@ export default function App() {
     if (!token || !effectiveSocketUrl) return
     fetchAuthedData()
     socket.connect()
+    socket.on('connect', () => setSocketConnected(true))
+    socket.on('disconnect', () => setSocketConnected(false))
     socket.on('job_update', (job) => {
       setJobs((prev) => {
         const rest = prev.filter((j) => j.id !== job.id)
         return [job, ...rest]
       })
+    })
+    socket.on('drive_update', (status) => {
+      if (status) {
+        setDriveStatus(status)
+      }
     })
     return () => socket.disconnect()
   }, [socket, token, effectiveSocketUrl])
@@ -451,33 +445,67 @@ export default function App() {
   }
 
   const startAll = async () => {
-    await fetch(`${apiUrl}/api/jobs/start-all`, { method: 'POST', headers: authHeaders })
-    showMessage('Started all drives', 'success')
+    if (driveBusy) {
+      showMessage('Drive action already in progress', 'info')
+      return
+    }
+    setDriveBusy(true)
+    setDriveAction('start-all')
+    try {
+      const resp = await fetch(`${apiUrl}/api/jobs/start-all`, { method: 'POST', headers: authHeaders })
+      const data = await resp.json().catch(() => ({}))
+      showMessage(resp.ok ? 'Started all drives' : data.error || 'Failed to start all drives', resp.ok ? 'success' : 'error')
+    } finally {
+      setDriveBusy(false)
+      setDriveAction('')
+    }
   }
 
   const startDrive = async (drive) => {
-    const resp = await fetch(`${apiUrl}/api/jobs/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ drive }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    showMessage(resp.ok ? `Started ${drive}` : (data.error || `Failed to start ${drive}`), resp.ok ? 'success' : 'error')
+    if (driveBusy) {
+      showMessage('Drive action already in progress', 'info')
+      return
+    }
+    setDriveBusy(true)
+    setDriveAction(`start-${drive}`)
+    try {
+      const resp = await fetch(`${apiUrl}/api/jobs/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ drive }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      showMessage(resp.ok ? `Started ${drive}` : (data.error || `Failed to start ${drive}`), resp.ok ? 'success' : 'error')
+    } finally {
+      setDriveBusy(false)
+      setDriveAction('')
+    }
   }
 
   const ejectSelectedDrive = async (drive) => {
-    const resp = await fetch(`${apiUrl}/api/drives/eject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ drive }),
-    })
-    const data = await resp.json().catch(() => ({}))
-    if (!resp.ok) {
-      showMessage(data.error || data.message || `Failed to eject ${drive}`, 'error')
+    if (driveBusy) {
+      showMessage('Drive action already in progress', 'info')
       return
     }
-    showMessage(data.message || `Ejected ${drive}`, 'success')
-    await fetchAuthedData()
+    setDriveBusy(true)
+    setDriveAction(`eject-${drive}`)
+    try {
+      const resp = await fetch(`${apiUrl}/api/drives/eject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ drive }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        showMessage(data.error || data.message || `Failed to eject ${drive}`, 'error')
+        return
+      }
+      showMessage(data.message || `Ejected ${drive}`, 'success')
+      await fetchAuthedData()
+    } finally {
+      setDriveBusy(false)
+      setDriveAction('')
+    }
   }
 
   const searchTMDB = async (query, mediaType = 'movie') => {
@@ -964,7 +992,23 @@ export default function App() {
             ))}
           </nav>
         </div>
-        <div className="top-bar-right">
+        <div className="top-bar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 10px',
+              height: '32px',
+              borderRadius: '999px',
+              backgroundColor: socketConnected ? '#10b981' : '#f59e0b',
+              color: '#fff',
+              fontSize: '0.9rem',
+            }}
+            title={socketConnected ? 'Live websocket connected' : 'Socket disconnected'}
+          >
+            {socketConnected ? 'Live' : 'Offline'}
+          </span>
           <button className="btn-icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -977,16 +1021,21 @@ export default function App() {
           <div className="grid-2 grid-gaps">
             <div className="card">
               <h2>🚀 Quick Actions</h2>
-              <button className="btn-primary full-width" onClick={startAll}>
-                Start All Drives
+              <button className="btn-primary full-width" onClick={startAll} disabled={driveBusy}>
+                {driveButtonLabel('Start All Drives', 'start-all')}
               </button>
               <div className="drive-buttons">
                 {(health?.drives || []).map((d) => (
-                  <button key={d} className="btn-secondary" onClick={() => startDrive(d)}>
-                    {d}
+                  <button key={d} className="btn-secondary" onClick={() => startDrive(d)} disabled={driveBusy}>
+                    {driveButtonLabel(d, `start-${d}`)}
                   </button>
                 ))}
               </div>
+              {driveBusy && (
+                <div className="alert alert-info" style={{ marginTop: '12px' }}>
+                  {driveAction ? `${driveAction.replace(/-/g, ' ')}…` : 'Processing drive action...'}
+                </div>
+              )}
             </div>
 
             <div className="card">
@@ -1078,12 +1127,9 @@ export default function App() {
                 <h2>Optical Drive Bay</h2>
                 <p className="drive-shell-subtitle">Live tray state, rip activity, and control actions for each mounted optical device.</p>
               </div>
-              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Drives</button>
-            </div>
-
-            <div className="drive-summary-band">
-              <div className="drive-summary-pill">
-                <span className="pill-label">Total</span>
+              <button className="btn-secondary" onClick={fetchAuthedData} disabled={authedLoading}>
+                {authedLoading ? 'Refreshing…' : 'Refresh Drives'}
+              </button>
                 <span className="pill-value">{driveStatus?.summary?.total ?? driveStatus.drives.length}</span>
               </div>
               <div className="drive-summary-pill">
@@ -1155,9 +1201,13 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="inline-actions drive-actions-row">
-                        <button className="btn-secondary" onClick={() => startDrive(d.drive)}>Start</button>
-                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>Eject</button>
+                              <div className="inline-actions drive-actions-row">
+                        <button className="btn-secondary" onClick={() => startDrive(d.drive)} disabled={driveBusy}>
+                          {driveButtonLabel('Start', `start-${d.drive}`)}
+                        </button>
+                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)} disabled={driveBusy}>
+                          {driveButtonLabel('Eject', `eject-${d.drive}`)}
+                        </button>
                         {activeJob && <button className="btn-secondary" onClick={() => cancelJob(activeJob.id)}>Terminate</button>}
                       </div>
                     </div>

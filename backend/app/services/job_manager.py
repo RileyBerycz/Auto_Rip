@@ -686,6 +686,7 @@ class JobManager:
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
             seen: set[str] = set()
+            statuses: list[dict[str, str | bool]] = []
             for configured in self._combined_drives():
                 drive = _preferred_display_drive(configured)
                 drive_key = _canonical_drive_key(drive)
@@ -694,6 +695,7 @@ class JobManager:
                 seen.add(drive_key)
 
                 status = probe_drive_status(drive)
+                statuses.append(status)
                 if status.get("status") == "empty":
                     self._maybe_auto_eject_empty(drive)
                     with self.lock:
@@ -716,6 +718,14 @@ class JobManager:
                         continue
 
                 self.start_job(drive)
+
+            if statuses:
+                summary = {
+                    "total": len(statuses),
+                    "with_disc": sum(1 for item in statuses if item.get("has_disc")),
+                    "readable": sum(1 for item in statuses if item.get("readable")),
+                }
+                self._emit("drive_update", {"drives": statuses, "summary": summary})
             time.sleep(10)
 
     def list_drive_statuses(self) -> list[dict[str, str | bool]]:

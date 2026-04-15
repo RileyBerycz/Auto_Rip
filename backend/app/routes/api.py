@@ -467,6 +467,91 @@ def health() -> tuple:
     ), 200
 
 
+@api_bp.get("/dashboard")
+@require_auth
+def dashboard() -> tuple:
+    manager = _manager()
+    settings = manager.settings
+
+    drive_statuses = manager.list_drive_statuses()
+    drives_summary = {
+        "total": len(drive_statuses),
+        "with_disc": sum(1 for d in drive_statuses if d.get("has_disc")),
+        "readable": sum(1 for d in drive_statuses if d.get("readable")),
+    }
+
+    library_payload = {
+        "movies": discover_media_items(settings.movies_path, "movie", settings.tmdb_api_key),
+        "tvshows": discover_media_items(settings.tv_path, "tv", settings.tmdb_api_key),
+        "movies_path": str(settings.movies_path),
+        "movies_path_exists": settings.movies_path.exists(),
+        "tv_path": str(settings.tv_path),
+        "tv_path_exists": settings.tv_path.exists(),
+    }
+
+    with _task_lock:
+        ordered = sorted(_tasks.values(), key=lambda x: x.get("updated_at", ""), reverse=True)
+    library_jobs = []
+    for job in manager.list_jobs():
+        if job.get("drive"):
+            continue
+        if not job.get("title", "").lower().startswith("library encode"):
+            continue
+        library_jobs.append(
+            {
+                "id": job["id"],
+                "kind": "library-encode",
+                "state": job["state"],
+                "title": job.get("title", ""),
+                "output_path": job.get("output_path", ""),
+                "logs": job.get("logs", []),
+                "updated_at": job.get("updated_at", ""),
+            }
+        )
+    maintenance_combined = sorted(ordered + library_jobs, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    return jsonify(
+        {
+            "ok": True,
+            "health": {
+                "ok": True,
+                "drives": manager.settings.drives,
+                "movies_path": str(settings.movies_path),
+                "tv_path": str(settings.tv_path),
+            },
+            "jobs": manager.list_jobs(),
+            "library": library_payload,
+            "capabilities": {
+                "ok": True,
+                "capabilities": {
+                    "lsdvd": bool(shutil.which("lsdvd")),
+                    "makemkvcon": _tool_exists(settings.makemkvcon_path),
+                    "eject": bool(shutil.which("eject")),
+                },
+                "drive_status": {drive: Path(drive).exists() for drive in settings.drives},
+                "paths": {
+                    "movies": {"path": str(settings.movies_path), "exists": settings.movies_path.exists()},
+                    "tv": {"path": str(settings.tv_path), "exists": settings.tv_path.exists()},
+                    "temp": {"path": str(settings.temp_rip_path), "exists": settings.temp_rip_path.exists()},
+                },
+            },
+            "settings": {"ok": True, "settings": settings.to_runtime_dict()},
+            "profile": {"ok": True, "profile": _store().get_settings(_profile_setting_keys())},
+            "history": {"ok": True, "history": manager.list_history(limit=500)},
+            "accounts": {"ok": True, "users": _store().list_users(), "current_user": _current_user()},
+            "drives": {"ok": True, "drives": drive_statuses, "summary": drives_summary},
+            "temp_files": {
+                "ok": True,
+                "root": str(settings.temp_rip_path),
+                "exists": settings.temp_rip_path.exists(),
+                "entries": _list_temp_entries(settings.temp_rip_path),
+                "summary": {},
+            },
+            "maintenance": {"ok": True, "tasks": maintenance_combined[:50]},
+        }
+    ), 200
+
+
 @api_bp.get("/drives/status")
 @require_auth
 def drives_status() -> tuple:
