@@ -27,11 +27,11 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:7272/api/setup/status', timeout=5)"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:7272/api/healthcheck', timeout=10)"
       interval: 20s
-      timeout: 8s
+      timeout: 12s
       retries: 5
-      start_period: 25s
+      start_period: 40s
     restart: unless-stopped
 
   frontend:

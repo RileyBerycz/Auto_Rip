@@ -258,6 +258,25 @@ def _list_temp_entries(root: Path, limit: int = 500) -> list[dict]:
     return entries
 
 
+@api_bp.get("/healthcheck")
+def healthcheck() -> tuple:
+    """Lightweight unauthenticated health endpoint for Docker healthchecks."""
+    manager = _manager()
+    store = _store()
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "configured": store.is_setup_complete(),
+                "drives": manager.settings.drives,
+                "movies_path": str(manager.settings.movies_path),
+                "tv_path": str(manager.settings.tv_path),
+            }
+        ),
+        200,
+    )
+
+
 @api_bp.get("/setup/status")
 def setup_status() -> tuple:
     store = _store()
