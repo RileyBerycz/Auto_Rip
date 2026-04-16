@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -12,12 +13,31 @@ def sanitize_filename(name: str) -> str:
     return "".join(ch for ch in name if ch.isalnum() or ch in keep).strip().replace("  ", " ")
 
 
+def _set_path_permissions(path: Path) -> None:
+    try:
+        if path.is_dir():
+            path.chmod(0o775)
+            for child in path.rglob("*"):
+                try:
+                    if child.is_dir():
+                        child.chmod(0o775)
+                    else:
+                        child.chmod(0o664)
+                except OSError:
+                    continue
+        else:
+            path.chmod(0o664)
+    except OSError:
+        pass
+
+
 def build_output_dir(base_path: Path, title: str, year: int | None = None) -> Path:
     folder = sanitize_filename(title)
     if year:
         folder = f"{folder} ({year})"
     out = base_path / folder
     out.mkdir(parents=True, exist_ok=True)
+    _set_path_permissions(out)
     return out
 
 

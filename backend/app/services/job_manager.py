@@ -127,6 +127,7 @@ class JobManager:
         self.encode_enqueued_paths: set[str] = set()
         self.encode_pending_count_by_job: dict[str, int] = {}
         self.encode_failed_count_by_job: dict[str, int] = {}
+        self.encode_nfo_after_complete: set[str] = set()
         self.encode_suffix = ".x265.mkv"
 
         # Background monitor allows hands-off operation in the web app.
@@ -224,7 +225,11 @@ class JobManager:
             payload = job.to_dict()
 
         self._emit("job_update", payload)
-        self._queue_encode_for_job(job_id, source="manual-identification")
+        queued_count = self._queue_encode_for_job(job_id, source="manual-identification")
+        if queued_count:
+            self.encode_nfo_after_complete.add(job_id)
+        else:
+            self._create_nfo_for_job(job_id)
         return {"ok": True, "output_path": str(output_dir)}
 
     def _set_job_encoding_started(self, job_id: str, queued_files: int, source: str) -> None:
@@ -243,24 +248,24 @@ class JobManager:
             payload = job.to_dict()
         self._emit("job_update", payload)
 
-    def _queue_encode_for_job(self, job_id: str, source: str) -> None:
+    def _queue_encode_for_job(self, job_id: str, source: str) -> int:
         with self.lock:
             job = self.jobs.get(job_id)
             if not job or not job.output_path:
-                return
+                return 0
             output_root = Path(job.output_path)
 
         if not output_root.exists():
-            return
+            return 0
         if not shutil.which("HandBrakeCLI"):
             with self.lock:
                 job = self.jobs.get(job_id)
                 if not job:
-                    return
+                    return 0
                 self._append_job_log(job, "Encoding skipped: HandBrakeCLI not available")
                 job.updated_at = datetime.utcnow()
                 self._emit("job_update", job.to_dict())
-            return
+            return 0
 
         if output_root.is_file():
             mkv_files = [output_root] if output_root.suffix.lower() == ".mkv" else []
@@ -280,7 +285,7 @@ class JobManager:
                     job.progress = 100
                     job.updated_at = datetime.utcnow()
                     self._emit("job_update", job.to_dict())
-            return
+            return 0
 
         queued_count = 0
         with self.encode_queue_lock:
@@ -295,6 +300,7 @@ class JobManager:
 
         if queued_count:
             self._set_job_encoding_started(job_id, queued_count, source)
+        return queued_count
 
     def _get_handbrake_preset_for_path(self, src: Path) -> str:
         try:
@@ -394,6 +400,10 @@ class JobManager:
             payload = job.to_dict()
 
         self._emit("job_update", payload)
+
+        if job_id in self.encode_nfo_after_complete:
+            self.encode_nfo_after_complete.discard(job_id)
+            self._create_nfo_for_job(job_id)
 
     def _create_nfo_for_job(self, job_id: str) -> None:
         with self.lock:
@@ -680,8 +690,25 @@ class JobManager:
             self.wait_media_change.add(drive_key)
 
         self._emit("job_update", job.to_dict())
+
+        if job.state in {JobState.complete, JobState.failed, JobState.needs_review, JobState.canceled}:
+            ok, message = eject_drive(drive)
+            with self.lock:
+                finished_job = self.jobs.get(job.id)
+                if finished_job:
+                    finished_job.updated_at = datetime.utcnow()
+                    if ok:
+                        self._append_job_log(finished_job, "Drive ejected after job completion")
+                    else:
+                        self._append_job_log(finished_job, f"Drive eject failed after job: {message}")
+                    self._emit("job_update", finished_job.to_dict())
+
         if job.state == JobState.complete and job.output_path:
-            self._create_nfo_for_job(job.id)
+            queued_count = self._queue_encode_for_job(job.id, source="auto-rip")
+            if queued_count:
+                self.encode_nfo_after_complete.add(job.id)
+            else:
+                self._create_nfo_for_job(job.id)
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():

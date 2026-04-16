@@ -140,6 +140,8 @@ class RipPipeline:
                     output_dir.mkdir(parents=True, exist_ok=True)
                     for child in temp_output_dir.iterdir():
                         shutil.move(str(child), str(output_dir / child.name))
+                    from .ripper import _set_path_permissions
+                    _set_path_permissions(output_dir)
                     shutil.rmtree(temp_output_dir, ignore_errors=True)
 
                     job.state = JobState.complete
