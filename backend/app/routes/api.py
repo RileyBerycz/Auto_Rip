@@ -749,20 +749,25 @@ def search_tmdb() -> tuple:
     Search TMDB for titles to help with manual overrides.
     Payload: { "query": "The Matrix", "media_type": "movie|tv" }
     """
-    from dvdflix_core.clients import TMDBClient
+    from dvdflix_core.clients import TmdbClient
     
     payload = request.get_json(silent=True) or {}
     query = str(payload.get("query", "")).strip()
-    media_type = str(payload.get("media_type", "movie")).strip()
+    media_type = str(payload.get("media_type", "movie")).strip().lower()
     
     if not query:
         return jsonify({"ok": False, "error": "query is required"}), 400
+    if media_type not in {"movie", "tv"}:
+        return jsonify({"ok": False, "error": "media_type must be movie or tv"}), 400
     
     manager = _manager()
-    tmdb = TMDBClient(api_key=manager.settings.tmdb_api_key)
+    tmdb = TmdbClient(api_key=manager.settings.tmdb_api_key)
     
     try:
-        results = tmdb.search(query, media_type)
+        if media_type == "tv":
+            results = tmdb.search_tv(query)
+        else:
+            results = tmdb.search_movie(query)
         return jsonify({"ok": True, "results": results}), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500

@@ -94,6 +94,7 @@ export default function App() {
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchMediaType, setSearchMediaType] = useState('movie')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [historyEditModal, setHistoryEditModal] = useState(null)
@@ -508,13 +509,14 @@ export default function App() {
     }
   }
 
-  const searchTMDB = async (query, mediaType = 'movie') => {
+  const searchTMDB = async (query, mediaType) => {
+    const type = mediaType || searchMediaType
     setSearching(true)
     try {
       const resp = await fetch(`${apiUrl}/api/search/tmdb`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ query, media_type: mediaType }),
+        body: JSON.stringify({ query, media_type: type }),
       })
       const data = await resp.json()
       setSearchResults(data.ok ? (data.results || []) : [])
@@ -979,6 +981,7 @@ export default function App() {
                 key={p}
                 className={`nav-tab ${activePage === p ? 'active' : ''}`}
                 onClick={() => setActivePage(p)}
+                title={`View the ${p.replace(/-/g, ' ')} page`}
               >
                 {p === 'dashboard' && '📊 Dashboard'}
                 {p === 'drives' && '💿 Drives'}
@@ -1012,7 +1015,7 @@ export default function App() {
           <button className="btn-icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
-          <button className="btn-secondary" onClick={logout}>Logout</button>
+          <button className="btn-secondary" onClick={logout} title="Sign out of the dashboard">Logout</button>
         </div>
       </header>
 
@@ -1021,12 +1024,12 @@ export default function App() {
           <div className="grid-2 grid-gaps">
             <div className="card">
               <h2>🚀 Quick Actions</h2>
-              <button className="btn-primary full-width" onClick={startAll} disabled={driveBusy}>
+              <button className="btn-primary full-width" onClick={startAll} disabled={driveBusy} title="Start ripping on every available drive">
                 {driveButtonLabel('Start All Drives', 'start-all')}
               </button>
               <div className="drive-buttons">
                 {(health?.drives || []).map((d) => (
-                  <button key={d} className="btn-secondary" onClick={() => startDrive(d)} disabled={driveBusy}>
+                  <button key={d} className="btn-secondary" onClick={() => startDrive(d)} disabled={driveBusy} title={`Start ripping on drive ${d}`}>
                     {driveButtonLabel(d, `start-${d}`)}
                   </button>
                 ))}
@@ -1093,12 +1096,12 @@ export default function App() {
                     {job.error && <div className="job-error">⚠️ {job.error}</div>}
                     <div className="inline-actions" style={{ marginTop: '8px' }}>
                       {isJobActive(job.state) && (
-                        <button className="btn-secondary" onClick={() => cancelJob(job.id)}>
+                        <button className="btn-secondary" onClick={() => cancelJob(job.id)} title="Stop this job and free the drive if possible">
                           Terminate Job
                         </button>
                       )}
                       {job.output_path && (
-                        <button className="btn-secondary" onClick={() => cleanupJobOutput(job.id)}>
+                        <button className="btn-secondary" onClick={() => cleanupJobOutput(job.id)} title="Remove temporary output for this job">
                           Cleanup Output
                         </button>
                       )}
@@ -1107,6 +1110,7 @@ export default function App() {
                       <button
                         className="btn-secondary"
                         onClick={() => setOverrideModal({ jobId: job.id, jobTitle: job.title || job.disc_label })}
+                        title="Open manual review modal to identify and move this job"
                       >
                         🔍 Manual Identify & Move
                       </button>
@@ -1333,9 +1337,15 @@ export default function App() {
               </select>
             </div>
             <div className="inline-actions">
-              <button className="btn-secondary" onClick={runEncodeLibrary}>Queue Encode Library</button>
-              <button className="btn-secondary" onClick={runRenameLibrary}>Queue Rename Library</button>
-              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Tasks</button>
+              <button className="btn-secondary" onClick={runEncodeLibrary} title="Queue a background encode job for the selected library scope">
+                Queue Encode Library
+              </button>
+              <button className="btn-secondary" onClick={runRenameLibrary} title="Queue a background rename job for the selected library scope">
+                Queue Rename Library
+              </button>
+              <button className="btn-secondary" onClick={fetchAuthedData} title="Refresh maintenance task status from the backend">
+                Refresh Tasks
+              </button>
             </div>
 
             {maintenanceTasks.length === 0 ? (
@@ -1604,10 +1614,10 @@ export default function App() {
                         {item.rating ? <span>★ {item.rating}</span> : null}
                       </div>
                       <div className="media-card-actions">
-                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading}>
+                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
                           {maintenanceButtonLabel('Encode', 'Queueing encode item')}
                         </button>
-                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading}>
+                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Rename this library item: ${item.path}`}>
                           {maintenanceButtonLabel('Rename', 'Queueing rename item')}
                         </button>
                       </div>
@@ -1824,15 +1834,17 @@ export default function App() {
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2>🔍 Search & Override Title</h2>
-            <button className="modal-close" onClick={() => setOverrideModal(null)}>✕</button>
-          </div>
-          
+            <button className="modal-close" onClick={() => setOverrideModal(null)} title="Close manual override dialog">✕</button>
           <div className="modal-body">
             <p className="modal-subtitle">Current: <strong>{overrideModal.jobTitle}</strong></p>
             
             <div className="form-group">
               <label>Search TMDB</label>
-              <div className="search-input-group">
+              <div className="search-input-row">
+                <select value={searchMediaType} onChange={(e) => setSearchMediaType(e.target.value)}>
+                  <option value="movie">Movie</option>
+                  <option value="tv">TV Show</option>
+                </select>
                 <input
                   type="text"
                   placeholder="Search for title..."
@@ -1848,6 +1860,7 @@ export default function App() {
                   className="btn-primary"
                   onClick={() => searchQuery.trim() && searchTMDB(searchQuery.trim())}
                   disabled={searching}
+                  title="Search TMDB for the current title query"
                 >
                   {searching ? 'Searching...' : 'Search'}
                 </button>
@@ -1860,19 +1873,20 @@ export default function App() {
                 {searchResults.map((result, idx) => (
                   <div key={idx} className="search-result-item">
                     <div className="result-info">
-                      <span className="result-title">{result.title}</span>
-                      <span className="result-year">{result.release_date?.substring(0, 4)}</span>
+                      <span className="result-title">{result.title || result.name}</span>
+                      <span className="result-year">{(result.release_date || result.first_air_date || '').substring(0, 4)}</span>
                     </div>
                     <button
                       className="btn-secondary"
                       onClick={() =>
                         overrideJobTitle(
                           overrideModal.jobId,
-                          result.title,
-                          result.release_date?.substring(0, 4) || '',
-                          'movie'
+                          result.title || result.name,
+                          (result.release_date || result.first_air_date || '').substring(0, 4),
+                          searchMediaType
                         )
                       }
+                      title="Apply this TMDB result to the job and move the output to the library"
                     >
                       Select
                     </button>
