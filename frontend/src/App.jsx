@@ -1131,23 +1131,24 @@ export default function App() {
                 <h2>Optical Drive Bay</h2>
                 <p className="drive-shell-subtitle">Live tray state, rip activity, and control actions for each mounted optical device.</p>
               </div>
-              <button className="btn-secondary" onClick={fetchAuthedData} disabled={authedLoading}>
-                {authedLoading ? 'Refreshing…' : 'Refresh Drives'}
-              </button>
+              <div className="drive-shell-header-actions">
+                <button className="btn-secondary" onClick={fetchAuthedData} disabled={authedLoading}>
+                  {authedLoading ? 'Refreshing…' : 'Refresh Drives'}
+                </button>
                 <span className="pill-value">{driveStatus?.summary?.total ?? driveStatus.drives.length}</span>
               </div>
-              <div className="drive-summary-pill">
-                <span className="pill-label">With Disc</span>
-                <span className="pill-value">{driveStatus?.summary?.with_disc ?? 0}</span>
-              </div>
-              <div className="drive-summary-pill">
-                <span className="pill-label">Readable</span>
-                <span className="pill-value">{driveStatus?.summary?.readable ?? 0}</span>
-              </div>
-              <div className="drive-summary-pill">
-                <span className="pill-label">Empty</span>
-                <span className="pill-value">{driveStatus?.summary?.empty ?? 0}</span>
-              </div>
+            </div>
+            <div className="drive-summary-pill">
+              <span className="pill-label">With Disc</span>
+              <span className="pill-value">{driveStatus?.summary?.with_disc ?? 0}</span>
+            </div>
+            <div className="drive-summary-pill">
+              <span className="pill-label">Readable</span>
+              <span className="pill-value">{driveStatus?.summary?.readable ?? 0}</span>
+            </div>
+            <div className="drive-summary-pill">
+              <span className="pill-label">Empty</span>
+              <span className="pill-value">{driveStatus?.summary?.empty ?? 0}</span>
             </div>
 
             {driveStatus.drives.length === 0 ? (
@@ -1835,6 +1836,7 @@ export default function App() {
           <div className="modal-header">
             <h2>🔍 Search & Override Title</h2>
             <button className="modal-close" onClick={() => setOverrideModal(null)} title="Close manual override dialog">✕</button>
+          </div>
           <div className="modal-body">
             <p className="modal-subtitle">Current: <strong>{overrideModal.jobTitle}</strong></p>
             
