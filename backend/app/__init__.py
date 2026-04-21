@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from flask import Flask
 from flask_cors import CORS
-from flask_socketio import SocketIO
 
 from .routes.api import api_bp
 from .services.job_manager import JobManager
+from .services.sse_manager import SSEManager
 from .services.state_store import StateStore
-
-socketio = SocketIO(cors_allowed_origins="*")
 
 
 def create_app() -> Flask:
@@ -41,11 +39,12 @@ def create_app() -> Flask:
     ]
     saved = store.get_settings(settings_keys)
 
-    manager = JobManager(socketio, settings_overrides=saved)
+    sse_manager = SSEManager()
+    manager = JobManager(sse_manager, settings_overrides=saved)
     app.extensions["job_manager"] = manager
     app.extensions["state_store"] = store
+    app.extensions["sse_manager"] = sse_manager
 
     app.register_blueprint(api_bp, url_prefix="/api")
-    socketio.init_app(app)
 
     return app

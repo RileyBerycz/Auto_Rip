@@ -9,14 +9,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from flask_socketio import SocketIO
-
 from dvdflix_core import JobState, RipPipeline, Settings
 from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.encoder import build_handbrake_command, get_video_resolution
 from dvdflix_core.models import RipJob
 from dvdflix_core.nfo import create_nfo_for_job
 from dvdflix_core.ripper import build_output_dir, eject_drive
+
+from .sse_manager import SSEManager
 
 
 def _canonical_drive_key(drive: str) -> str:
@@ -106,8 +106,8 @@ def has_disc(drive: str) -> bool:
 
 
 class JobManager:
-    def __init__(self, socketio: SocketIO, settings_overrides: dict[str, str] | None = None) -> None:
-        self.socketio = socketio
+    def __init__(self, sse_manager: SSEManager, settings_overrides: dict[str, str] | None = None) -> None:
+        self.sse_manager = sse_manager
         self.settings = Settings.from_overrides(settings_overrides)
         self.pipeline = RipPipeline(self.settings)
         self.executor = ThreadPoolExecutor(max_workers=max(1, len(self.settings.drives) or 1))
@@ -144,8 +144,8 @@ class JobManager:
 
         old_executor.shutdown(wait=False)
 
-    def _emit(self, event: str, payload: dict) -> None:
-        self.socketio.emit(event, payload)
+    def _emit(self, event: str, payload: dict, room: str = None) -> None:
+        self.sse_manager.emit(event, payload, room)
 
     def list_jobs(self) -> list[dict]:
         with self.lock:
@@ -430,7 +430,9 @@ class JobManager:
 
     def _encode_file_for_job(self, job_id: str, src_abs: str) -> None:
         src = Path(src_abs)
-        temp_out = src.with_name(f"{src.stem}.encoding-temp{src.suffix}")
+        temp_root = Path(self.settings.temp_rip_path or "/tmp")
+        temp_root.mkdir(parents=True, exist_ok=True)
+        temp_out = temp_root / f"{src.stem}.encoding-temp{src.suffix}"
         failed = False
 
         with self.lock:

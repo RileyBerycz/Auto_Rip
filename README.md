@@ -8,7 +8,7 @@ Self-hosted DVD ripping and media management system with both a standalone curse
 - `scripts/auto_rip_test.py`: one-shot rip/identify test runner.
 - `scripts/encode_library.py`: HandBrake x265 batch encoder.
 - `scripts/rename_library.py`: library naming normalizer and extras classifier.
-- `backend/`: Flask + SocketIO API for the Docker app.
+- `backend/`: Flask + SSE API for the Docker app.
 - `frontend/`: React + Vite dashboard.
 - `dvdflix_core/`: shared ripping/identification pipeline.
 

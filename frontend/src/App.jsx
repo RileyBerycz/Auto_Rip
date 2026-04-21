@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { io } from 'socket.io-client'
 
 const envApiUrl = import.meta.env.VITE_API_URL || ''
-const envSocketUrl = import.meta.env.VITE_SOCKET_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
@@ -18,9 +16,7 @@ const pipelineStages = [
 
 export default function App() {
   const [apiUrl, setApiUrl] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
-  const [socketUrl, setSocketUrl] = useState(localStorage.getItem('dvdflix_socket_url') || envSocketUrl)
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
-  const [socketUrlInput, setSocketUrlInput] = useState(socketUrl)
   const [theme, setTheme] = useState(localStorage.getItem('dvdflix_theme') || 'dark')
   const [activePage, setActivePage] = useState('dashboard')
 
@@ -83,6 +79,8 @@ export default function App() {
   const [maintenanceScope, setMaintenanceScope] = useState('all')
   const [maintenanceBusy, setMaintenanceBusy] = useState(false)
   const [maintenanceAction, setMaintenanceAction] = useState('')
+  const [driveBusy, setDriveBusy] = useState(false)
+  const [driveAction, setDriveAction] = useState('')
   const [setupLoading, setSetupLoading] = useState(false)
   const [authedLoading, setAuthedLoading] = useState(false)
   const [authedLoaded, setAuthedLoaded] = useState(false)
@@ -90,6 +88,7 @@ export default function App() {
   const [accounts, setAccounts] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
   const [newAccountForm, setNewAccountForm] = useState({ username: '', password: '', is_admin: false })
+  const [sseConnected, setSseConnected] = useState(false)
   
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
@@ -101,8 +100,8 @@ export default function App() {
   const authedRefreshInFlight = useRef(false)
   const setupRefreshInFlight = useRef(false)
 
-  const effectiveSocketUrl = socketUrl || apiUrl
-  const socket = useMemo(() => io(effectiveSocketUrl, { autoConnect: false, transports: ['websocket', 'polling'] }), [effectiveSocketUrl])
+  const effectiveApiUrl = apiUrl
+  const eventSource = useMemo(() => token ? new EventSource(`${effectiveApiUrl}/api/events?token=${token}`) : null, [effectiveApiUrl, token])
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
   useEffect(() => {
@@ -199,24 +198,46 @@ export default function App() {
   }, [apiUrl])
 
   useEffect(() => {
-    if (!token || !effectiveSocketUrl) return
+    if (!token || !effectiveApiUrl) return
     fetchAuthedData()
-    socket.connect()
-    socket.on('connect', () => setSocketConnected(true))
-    socket.on('disconnect', () => setSocketConnected(false))
-    socket.on('job_update', (job) => {
-      setJobs((prev) => {
-        const rest = prev.filter((j) => j.id !== job.id)
-        return [job, ...rest]
-      })
-    })
-    socket.on('drive_update', (status) => {
-      if (status) {
-        setDriveStatus(status)
+    if (!eventSource) return
+
+    eventSource.onopen = () => {
+      setSseConnected(true)
+    }
+
+    eventSource.onerror = () => {
+      setSseConnected(false)
+    }
+
+    eventSource.addEventListener('job_update', (event) => {
+      try {
+        const job = JSON.parse(event.data)
+        setJobs((prev) => {
+          const rest = prev.filter((j) => j.id !== job.id)
+          return [job, ...rest]
+        })
+      } catch {
+        // ignore invalid SSE payloads
       }
     })
-    return () => socket.disconnect()
-  }, [socket, token, effectiveSocketUrl])
+
+    eventSource.addEventListener('drive_update', (event) => {
+      try {
+        const status = JSON.parse(event.data)
+        if (status) {
+          setDriveStatus(status)
+        }
+      } catch {
+        // ignore invalid SSE payloads
+      }
+    })
+
+    return () => {
+      eventSource.close()
+      setSseConnected(false)
+    }
+  }, [eventSource, token, effectiveApiUrl])
 
   useEffect(() => {
     if (!apiUrl || token) return
@@ -226,23 +247,12 @@ export default function App() {
     return () => clearInterval(timer)
   }, [apiUrl, token])
 
-  useEffect(() => {
-    if (!token || !apiUrl) return
-    const timer = setInterval(() => {
-      fetchAuthedData()
-    }, AUTO_REFRESH_MS)
-    return () => clearInterval(timer)
-  }, [token, apiUrl])
-
   const applyBackendUrls = () => {
     const nextApi = (apiUrlInput || '').trim().replace(/\/$/, '')
-    const nextSocket = (socketUrlInput || '').trim().replace(/\/$/, '')
     setApiUrl(nextApi)
-    setSocketUrl(nextSocket)
     setSetupError('')
     setSetupLoading(true)
     localStorage.setItem('dvdflix_api_url', nextApi)
-    localStorage.setItem('dvdflix_socket_url', nextSocket)
   }
 
   const login = async () => {
@@ -743,15 +753,6 @@ export default function App() {
                 onChange={(e) => setApiUrlInput(e.target.value)}
               />
             </div>
-            <div className="form-group">
-              <label>Socket URL (optional)</label>
-              <input 
-                type="text"
-                placeholder="Leave empty to use API URL"
-                value={socketUrlInput}
-                onChange={(e) => setSocketUrlInput(e.target.value)}
-              />
-            </div>
             <button className="btn-primary" onClick={applyBackendUrls} disabled={setupLoading}>
               {setupLoading ? 'Connecting…' : 'Connect'}
             </button>
@@ -1004,13 +1005,13 @@ export default function App() {
               padding: '0 10px',
               height: '32px',
               borderRadius: '999px',
-              backgroundColor: socketConnected ? '#10b981' : '#f59e0b',
+              backgroundColor: sseConnected ? '#10b981' : '#f59e0b',
               color: '#fff',
               fontSize: '0.9rem',
             }}
-            title={socketConnected ? 'Live websocket connected' : 'Socket disconnected'}
+            title={sseConnected ? 'Live event stream connected' : 'Offline'}
           >
-            {socketConnected ? 'Live' : 'Offline'}
+            {sseConnected ? 'Live' : 'Offline'}
           </span>
           <button className="btn-icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}

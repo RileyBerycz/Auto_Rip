@@ -2,7 +2,7 @@ import logging
 
 from flask import request
 
-from backend.app import create_app, socketio
+from backend.app import create_app
 
 app = create_app()
 
@@ -23,4 +23,4 @@ if __name__ == "__main__":
     host = app.config["BACKEND_HOST"]
     port = app.config["BACKEND_PORT"]
     print(f"DvDRip backend starting on {host}:{port}", flush=True)
-    socketio.run(app, host=host, port=port, log_output=True)
+    app.run(host=host, port=port, debug=False)

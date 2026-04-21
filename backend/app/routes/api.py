@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, Response
 
 from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.library import discover_media_items
@@ -128,7 +128,8 @@ def _auth_token() -> str:
     raw = request.headers.get("Authorization", "")
     if raw.lower().startswith("bearer "):
         return raw[7:].strip()
-    return ""
+    # For SSE, check query param
+    return request.args.get("token", "")
 
 
 def _current_user() -> dict | None:
@@ -1027,3 +1028,30 @@ def maintenance_cancel_task(task_id: str) -> tuple:
         task["updated_at"] = datetime.utcnow().isoformat() + "Z"
         _append_task_log(task, "Canceled before start")
         return jsonify({"ok": True}), 200
+
+
+@api_bp.get("/events")
+@require_auth
+def events() -> Response:
+    import queue
+
+    sse_manager = current_app.extensions["sse_manager"]
+    client_id = str(uuid.uuid4())
+
+    def generate():
+        q = sse_manager.add_client(client_id)
+        try:
+            while True:
+                try:
+                    message = q.get(timeout=30)
+                    yield message
+                except queue.Empty:
+                    yield "data: keepalive\n\n"
+        finally:
+            sse_manager.remove_client(client_id)
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
