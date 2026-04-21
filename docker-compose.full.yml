@@ -11,10 +11,11 @@ services:
       - ${DRIVE_1:-/dev/sr1}:${DRIVE_1:-/dev/sr1}
       - ${DRIVE_2:-/dev/sr2}:${DRIVE_2:-/dev/sr2}
     environment:
+      - FLASK_ENV=production
       - MOVIES_PATH
       - TV_PATH
       - TEMP_RIP_PATH
-      - DRIVES
+      - DRIVES=${DRIVES:-/dev/sr0}
       - TMDB_API_KEY
       - OMDB_API_KEY
       - TVDB_API_KEY
@@ -57,7 +58,6 @@ services:
     tty: true
     environment:
       - VITE_API_URL
-      - VITE_SOCKET_URL
     ports:
       - "${FRONTEND_PORT:-7273}:7273"
     depends_on:

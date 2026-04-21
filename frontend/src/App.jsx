@@ -1327,61 +1327,6 @@ export default function App() {
               </div>
             )}
           </div>
-
-          <div className="card">
-            <h2>🛠️ Post-Rip Pipeline</h2>
-            <div className="form-group">
-              <label>Scope</label>
-              <select value={maintenanceScope} onChange={(e) => setMaintenanceScope(e.target.value)}>
-                <option value="all">all (movies + tv)</option>
-                <option value="movies">movies only</option>
-                <option value="tv">tv only</option>
-              </select>
-            </div>
-            <div className="inline-actions">
-              <button className="btn-secondary" onClick={runEncodeLibrary} title="Queue a background encode job for the selected library scope">
-                Queue Encode Library
-              </button>
-              <button className="btn-secondary" onClick={runRenameLibrary} title="Queue a background rename job for the selected library scope">
-                Queue Rename Library
-              </button>
-              <button className="btn-secondary" onClick={fetchAuthedData} title="Refresh maintenance task status from the backend">
-                Refresh Tasks
-              </button>
-            </div>
-
-            {maintenanceTasks.length === 0 ? (
-              <p className="empty-state">No maintenance tasks yet.</p>
-            ) : (
-              <div className="jobs-list" style={{ marginTop: '12px' }}>
-                {maintenanceTasks.slice(0, 10).map((task) => (
-                  <div key={task.id} className="job-item">
-                    <div className="job-header">
-                      <span className="job-drive">{task.kind}</span>
-                      <span className="job-title">{task.id}</span>
-                      <span className="job-state" style={{ backgroundColor: jobStateColor(task.state === 'running' ? 'ripping' : task.state === 'complete' ? 'complete' : task.state === 'failed' ? 'failed' : 'pending') }}>
-                        {task.state}
-                      </span>
-                    </div>
-                    {Array.isArray(task.logs) && task.logs.length > 0 && (
-                      <div className="job-log-box">
-                        {task.logs.slice(-80).map((line, idx) => (
-                          <div key={`${task.id}-line-${idx}`} className="job-log-line">{line}</div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="inline-actions" style={{ marginTop: '8px' }}>
-                      {(task.state === 'queued' || task.state === 'running') && (
-                        <button className="btn-secondary" onClick={() => cancelMaintenanceTask(task.id)}>
-                          Terminate Task
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
