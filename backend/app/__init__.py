@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from flask import Flask
+import os
+
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 
 from .routes.api import api_bp
@@ -10,7 +12,7 @@ from .services.state_store import StateStore
 
 
 def create_app() -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder="../static", static_url_path="")
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config["BACKEND_HOST"] = "0.0.0.0"
     app.config["BACKEND_PORT"] = 7272
@@ -46,5 +48,19 @@ def create_app() -> Flask:
     app.extensions["sse_manager"] = sse_manager
 
     app.register_blueprint(api_bp, url_prefix="/api")
+
+    # Serve React frontend; fallback to index.html for SPA routing
+    @app.route("/")
+    def serve_index():
+        return send_from_directory(app.static_folder, "index.html")
+
+    @app.route("/<path:path>")
+    def serve_static(path):
+        # Try serving static file first
+        file_path = os.path.join(app.static_folder, path)
+        if os.path.isfile(file_path):
+            return send_from_directory(app.static_folder, path)
+        # Fallback to index.html for SPA routing
+        return send_from_directory(app.static_folder, "index.html")
 
     return app

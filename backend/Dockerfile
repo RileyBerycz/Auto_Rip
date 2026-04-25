@@ -1,3 +1,12 @@
+# Stage 1: Build React frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --frozen-lockfile
+COPY frontend ./
+RUN npm run build
+
+# Stage 2: Build Python backend with bundled frontend
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -58,6 +67,9 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY dvdflix_core /app/dvdflix_core
 COPY backend /app/backend
 COPY scripts /app/scripts
+
+# Copy bundled frontend from builder stage
+COPY --from=frontend-builder /frontend/dist /app/backend/static
 
 ENV PYTHONPATH=/app
 EXPOSE 7272

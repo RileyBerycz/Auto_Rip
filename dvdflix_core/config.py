@@ -63,14 +63,15 @@ def parse_drives(value: str | None) -> list[str]:
                 canonical_to_drive[key] = drive
         return sorted(canonical_to_drive.values())
 
-    if value is None:
-        return discover_optical_drives() or ["/dev/sr0", "/dev/sr1", "/dev/sr2"]
+    if value is None or value.strip() == "":
+        # Auto-detect at runtime; use only drives that actually exist.
+        return discover_optical_drives()
 
     parsed = [d.strip() for d in value.split(",") if d.strip()]
     if parsed:
         return _normalize(parsed)
 
-    # Blank value in env or UI means "auto-detect".
+    # Fallback to auto-detect if parsing resulted in empty list.
     return discover_optical_drives()
 
 

@@ -15,7 +15,6 @@ services:
       - MOVIES_PATH
       - TV_PATH
       - TEMP_RIP_PATH
-      - DRIVES=${DRIVES:-/dev/sr0}
       - TMDB_API_KEY
       - OMDB_API_KEY
       - TVDB_API_KEY
@@ -31,7 +30,6 @@ services:
       - SEARXNG_URL
       - HANDBRAKE_PRESET
       - HSA_OVERRIDE_GFX_VERSION
-      - FLASK_ENV
     ports:
       - "${BACKEND_PORT:-7272}:7272"
     volumes:
@@ -39,6 +37,9 @@ services:
       - ${HOST_MOVIES_PATH}:${MOVIES_PATH:-/media/movies}
       - ${HOST_TV_PATH}:${TV_PATH:-/media/tvshows}
       - ${HOST_TEMP_RIP_PATH}:${TEMP_RIP_PATH:-/media/tmp}
+      - /mnt/storage/jellyfin:/mnt/storage/jellyfin
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
     healthcheck:
       test:
         - CMD
@@ -49,30 +50,6 @@ services:
       timeout: 12s
       retries: 5
       start_period: 40s
-    restart: unless-stopped
-
-  frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/rileyberycz/dvdflix-frontend}:${IMAGE_TAG:-latest}
-    pull_policy: always
-    stdin_open: true
-    tty: true
-    environment:
-      - VITE_API_URL
-    ports:
-      - "${FRONTEND_PORT:-7273}:7273"
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://localhost:7273').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 20s
-      timeout: 8s
-      retries: 5
-      start_period: 30s
     restart: unless-stopped
 
   # Searxng for superior metasearch during escalation

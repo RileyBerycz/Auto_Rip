@@ -34,28 +34,6 @@ services:
       start_period: 40s
     restart: unless-stopped
 
-  frontend:
-    image: ghcr.io/rileyberycz/dvdflix-frontend:latest
-    pull_policy: always
-    stdin_open: true
-    tty: true
-    ports:
-      - "7273:7273"
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://localhost:7273').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-      interval: 20s
-      timeout: 8s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
 volumes:
   dvdflix-data:
   dvdflix-temp:

@@ -11,6 +11,35 @@ from .nfo import _parse_folder_title_year
 TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w300"
 
 
+def _extract_encoding_specs(mkv_path: Path) -> dict[str, Any]:
+    """Extract codec, resolution, and other encoding specs from MKV file."""
+    specs = {
+        "codec": None,
+        "resolution": None,
+        "encoded": False,
+    }
+    try:
+        codec = get_video_codec(mkv_path)
+        specs["codec"] = codec
+        specs["encoded"] = codec and "hevc" in codec.lower() if codec else False
+        
+        width, height = get_video_resolution(mkv_path)
+        if width and height:
+            specs["resolution"] = f"{width}x{height}"
+            # Detect if it's HD, Full HD, 4K, etc
+            if height >= 2160:
+                specs["quality_tier"] = "4K"
+            elif height >= 1080:
+                specs["quality_tier"] = "1080p"
+            elif height >= 720:
+                specs["quality_tier"] = "720p"
+            else:
+                specs["quality_tier"] = "SD"
+    except Exception:
+        pass
+    return specs
+
+
 def _normalize_name(name: str) -> str:
     return re.sub(r"[_.]+", " ", name).strip()
 
@@ -123,6 +152,10 @@ def _scan_folder_item(path: Path, root: Path, media_type: str, tmdb_api_key: str
 
     title, year = _parse_folder_title_year(path.name)
     metadata = _fetch_tmdb_info(title, year, media_type, tmdb_api_key)
+    
+    # Get encoding specs from first MKV file
+    encoding_specs = _extract_encoding_specs(mkv_paths[0])
+    
     item = {
         "path": str(path.relative_to(root)),
         "media_type": media_type,
@@ -137,6 +170,7 @@ def _scan_folder_item(path: Path, root: Path, media_type: str, tmdb_api_key: str
         "needs_rename": _needs_rename(path.name),
         "file_count": len(mkv_paths),
         "item_type": "folder",
+        "encoding_specs": encoding_specs,
     }
     return item
 
@@ -147,6 +181,10 @@ def _scan_file_item(path: Path, root: Path, media_type: str, tmdb_api_key: str) 
 
     title, year = _parse_folder_title_year(path.stem)
     metadata = _fetch_tmdb_info(title, year, media_type, tmdb_api_key)
+    
+    # Get encoding specs from this MKV file
+    encoding_specs = _extract_encoding_specs(path)
+    
     item = {
         "path": str(path.relative_to(root)),
         "media_type": media_type,
@@ -161,6 +199,7 @@ def _scan_file_item(path: Path, root: Path, media_type: str, tmdb_api_key: str) 
         "needs_rename": _needs_rename(path.name),
         "file_count": 1,
         "item_type": "file",
+        "encoding_specs": encoding_specs,
     }
     return item
 
