@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Use relative API URL - backend and frontend are now on the same origin
-const API_BASE_URL = '/api'
+const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
@@ -16,6 +15,8 @@ const pipelineStages = [
 ]
 
 export default function App() {
+  const [apiUrl, setApiUrl] = useState(localStorage.getItem('dvdflix_api_url') || envApiUrl)
+  const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [theme, setTheme] = useState(localStorage.getItem('dvdflix_theme') || 'dark')
   const [activePage, setActivePage] = useState('dashboard')
 
@@ -96,11 +97,11 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [historyEditModal, setHistoryEditModal] = useState(null)
-  const [libraryFilter, setLibraryFilter] = useState('all') // 'all', 'needs_encode', 'needs_rename', 'encoded'
   const authedRefreshInFlight = useRef(false)
   const setupRefreshInFlight = useRef(false)
 
-  const eventSource = useMemo(() => token ? new EventSource(`${API_BASE_URL}/events?token=${token}`) : null, [token])
+  const effectiveApiUrl = apiUrl
+  const eventSource = useMemo(() => token ? new EventSource(`${effectiveApiUrl}/api/events?token=${token}`) : null, [effectiveApiUrl, token])
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function App() {
       return
     }
     try {
-      const resp = await fetch(`${API_BASE_URL}/setup/status`)
+      const resp = await fetch(`${apiUrl}/api/setup/status`)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       setSetupStatus(data)
@@ -140,7 +141,7 @@ export default function App() {
         setSettingsDraft(data.settings)
       }
     } catch (err) {
-      setSetupError(`Cannot reach backend: ${err.message}`)
+      setSetupError(`Cannot reach ${apiUrl}: ${err.message}`)
     } finally {
       setupRefreshInFlight.current = false
       setSetupLoading(false)
@@ -153,7 +154,7 @@ export default function App() {
     authedRefreshInFlight.current = true
     setAuthedLoading(true)
     try {
-      const resp = await fetch(`${API_BASE_URL}/dashboard`, { headers: authHeaders })
+      const resp = await fetch(`${apiUrl}/api/dashboard`, { headers: authHeaders })
       if (resp.status === 401) {
         setToken('')
         localStorage.removeItem('dvdflix_token')
@@ -197,7 +198,7 @@ export default function App() {
   }, [apiUrl])
 
   useEffect(() => {
-    if (!token) return
+    if (!token || !effectiveApiUrl) return
     fetchAuthedData()
     if (!eventSource) return
 
@@ -236,16 +237,7 @@ export default function App() {
       eventSource.close()
       setSseConnected(false)
     }
-  }, [eventSource, token])
-
-  const applyLibraryFilter = (items) => {
-    return items.filter((item) => {
-      if (libraryFilter === 'needs_encode') return item.needs_encode
-      if (libraryFilter === 'needs_rename') return item.needs_rename
-      if (libraryFilter === 'encoded') return item.encoding_specs?.encoded && !item.needs_encode
-      return true // 'all'
-    })
-  }
+  }, [eventSource, token, effectiveApiUrl])
 
   useEffect(() => {
     if (!apiUrl || token) return
@@ -255,8 +247,16 @@ export default function App() {
     return () => clearInterval(timer)
   }, [apiUrl, token])
 
+  const applyBackendUrls = () => {
+    const nextApi = (apiUrlInput || '').trim().replace(/\/$/, '')
+    setApiUrl(nextApi)
+    setSetupError('')
+    setSetupLoading(true)
+    localStorage.setItem('dvdflix_api_url', nextApi)
+  }
+
   const login = async () => {
-    const resp = await fetch(`${API_BASE_URL}/auth/login`, {
+    const resp = await fetch(`${apiUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm),
@@ -272,7 +272,7 @@ export default function App() {
   }
 
   const initializeSetup = async () => {
-    const resp = await fetch(`${API_BASE_URL}/setup/initialize`, {
+    const resp = await fetch(`${apiUrl}/api/setup/initialize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(setupForm),
@@ -290,7 +290,7 @@ export default function App() {
 
   const detectDrives = async () => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/setup/detected-drives`)
+      const resp = await fetch(`${apiUrl}/api/setup/detected-drives`)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       const drives = data?.drives || []
@@ -311,7 +311,7 @@ export default function App() {
 
   const saveSettings = async () => {
     if (!settingsDraft) return
-    const resp = await fetch(`${API_BASE_URL}/settings`, {
+    const resp = await fetch(`${apiUrl}/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(settingsDraft),
@@ -338,7 +338,7 @@ export default function App() {
     const ok = window.confirm('Delete all files and folders under TEMP_RIP_PATH? This cannot be undone.')
     if (!ok) return
 
-    const resp = await fetch(`${API_BASE_URL}/temp-files/cleanup`, {
+    const resp = await fetch(`${apiUrl}/api/temp-files/cleanup`, {
       method: 'POST',
       headers: { ...authHeaders },
     })
@@ -359,7 +359,7 @@ export default function App() {
     setMaintenanceBusy(true)
     setMaintenanceAction(`Queueing encode ${scope}`)
     try {
-      const resp = await fetch(`${API_BASE_URL}/maintenance/encode-library`, {
+      const resp = await fetch(`${apiUrl}/api/maintenance/encode-library`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ scope, suffix: '.x265.mkv' }),
@@ -385,7 +385,7 @@ export default function App() {
     setMaintenanceBusy(true)
     setMaintenanceAction(`Queueing encode item`)
     try {
-      const resp = await fetch(`${API_BASE_URL}/maintenance/encode-item`, {
+      const resp = await fetch(`${apiUrl}/api/maintenance/encode-item`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ scope, path, suffix: '.x265.mkv' }),
@@ -411,7 +411,7 @@ export default function App() {
     setMaintenanceBusy(true)
     setMaintenanceAction(`Queueing rename ${scope}`)
     try {
-      const resp = await fetch(`${API_BASE_URL}/maintenance/rename-library`, {
+      const resp = await fetch(`${apiUrl}/api/maintenance/rename-library`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ scope }),
@@ -437,7 +437,7 @@ export default function App() {
     setMaintenanceBusy(true)
     setMaintenanceAction('Queueing rename item')
     try {
-      const resp = await fetch(`${API_BASE_URL}/maintenance/rename-item`, {
+      const resp = await fetch(`${apiUrl}/api/maintenance/rename-item`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ scope, path }),
@@ -463,7 +463,7 @@ export default function App() {
     setDriveBusy(true)
     setDriveAction('start-all')
     try {
-      const resp = await fetch(`${API_BASE_URL}/jobs/start-all`, { method: 'POST', headers: authHeaders })
+      const resp = await fetch(`${apiUrl}/api/jobs/start-all`, { method: 'POST', headers: authHeaders })
       const data = await resp.json().catch(() => ({}))
       showMessage(resp.ok ? 'Started all drives' : data.error || 'Failed to start all drives', resp.ok ? 'success' : 'error')
     } finally {
@@ -480,7 +480,7 @@ export default function App() {
     setDriveBusy(true)
     setDriveAction(`start-${drive}`)
     try {
-      const resp = await fetch(`${API_BASE_URL}/jobs/start`, {
+      const resp = await fetch(`${apiUrl}/api/jobs/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ drive }),
@@ -501,7 +501,7 @@ export default function App() {
     setDriveBusy(true)
     setDriveAction(`eject-${drive}`)
     try {
-      const resp = await fetch(`${API_BASE_URL}/drives/eject`, {
+      const resp = await fetch(`${apiUrl}/api/drives/eject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ drive }),
@@ -523,7 +523,7 @@ export default function App() {
     const type = mediaType || searchMediaType
     setSearching(true)
     try {
-      const resp = await fetch(`${API_BASE_URL}/search/tmdb`, {
+      const resp = await fetch(`${apiUrl}/api/search/tmdb`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ query, media_type: type }),
@@ -539,7 +539,7 @@ export default function App() {
   }
 
   const overrideJobTitle = async (jobId, title, year, mediaType) => {
-    const resp = await fetch(`${API_BASE_URL}/jobs/${jobId}/override-title`, {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/override-title`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ title, year, media_type: mediaType }),
@@ -562,7 +562,7 @@ export default function App() {
       media_type: historyEditModal.media_type || 'movie',
       notes: historyEditModal.notes || '',
     }
-    const resp = await fetch(`${API_BASE_URL}/history/${historyEditModal.disc_hash}`, {
+    const resp = await fetch(`${apiUrl}/api/history/${historyEditModal.disc_hash}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(payload),
@@ -588,7 +588,7 @@ export default function App() {
       return
     }
 
-    const resp = await fetch(`${API_BASE_URL}/accounts`, {
+    const resp = await fetch(`${apiUrl}/api/accounts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(payload),
@@ -648,7 +648,7 @@ export default function App() {
   }
 
   const cancelJob = async (jobId) => {
-    const resp = await fetch(`${API_BASE_URL}/jobs/${jobId}/cancel`, {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/cancel`, {
       method: 'POST',
       headers: { ...authHeaders },
     })
@@ -658,7 +658,7 @@ export default function App() {
   }
 
   const cleanupJobOutput = async (jobId) => {
-    const resp = await fetch(`${API_BASE_URL}/jobs/${jobId}/cleanup-output`, {
+    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/cleanup-output`, {
       method: 'POST',
       headers: { ...authHeaders },
     })
@@ -668,7 +668,7 @@ export default function App() {
   }
 
   const cancelMaintenanceTask = async (taskId) => {
-    const resp = await fetch(`${API_BASE_URL}/maintenance/tasks/${taskId}/cancel`, {
+    const resp = await fetch(`${apiUrl}/api/maintenance/tasks/${taskId}/cancel`, {
       method: 'POST',
       headers: { ...authHeaders },
     })
@@ -731,6 +731,38 @@ export default function App() {
   }, [jobs, maintenanceTasks])
 
   const activeDashboardCount = dashboardItems.filter((item) => isJobActive(item.state)).length
+
+  // Connection Setup Page
+  if (!setupStatus) {
+    return (
+      <div className="page setup-page">
+        <div className="setup-container">
+          <div className="setup-header">
+            <h1>🎬 DvDRip</h1>
+            <p>Self-hosted DVD Operations Console</p>
+          </div>
+          
+          <div className="setup-card">
+            <h2>Backend Connection</h2>
+            <div className="form-group">
+              <label>API URL</label>
+              <input 
+                type="text"
+                placeholder="http://localhost:7272"
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
+              />
+            </div>
+            <button className="btn-primary" onClick={applyBackendUrls} disabled={setupLoading}>
+              {setupLoading ? 'Connecting…' : 'Connect'}
+            </button>
+            {setupLoading && <div className="alert alert-info">Connecting to backend…</div>}
+            {setupError && <div className="alert alert-error">{setupError}</div>}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // First-Run Setup
   if (!setupStatus.configured) {
@@ -1295,6 +1327,61 @@ export default function App() {
               </div>
             )}
           </div>
+
+          <div className="card">
+            <h2>🛠️ Post-Rip Pipeline</h2>
+            <div className="form-group">
+              <label>Scope</label>
+              <select value={maintenanceScope} onChange={(e) => setMaintenanceScope(e.target.value)}>
+                <option value="all">all (movies + tv)</option>
+                <option value="movies">movies only</option>
+                <option value="tv">tv only</option>
+              </select>
+            </div>
+            <div className="inline-actions">
+              <button className="btn-secondary" onClick={runEncodeLibrary} title="Queue a background encode job for the selected library scope">
+                Queue Encode Library
+              </button>
+              <button className="btn-secondary" onClick={runRenameLibrary} title="Queue a background rename job for the selected library scope">
+                Queue Rename Library
+              </button>
+              <button className="btn-secondary" onClick={fetchAuthedData} title="Refresh maintenance task status from the backend">
+                Refresh Tasks
+              </button>
+            </div>
+
+            {maintenanceTasks.length === 0 ? (
+              <p className="empty-state">No maintenance tasks yet.</p>
+            ) : (
+              <div className="jobs-list" style={{ marginTop: '12px' }}>
+                {maintenanceTasks.slice(0, 10).map((task) => (
+                  <div key={task.id} className="job-item">
+                    <div className="job-header">
+                      <span className="job-drive">{task.kind}</span>
+                      <span className="job-title">{task.id}</span>
+                      <span className="job-state" style={{ backgroundColor: jobStateColor(task.state === 'running' ? 'ripping' : task.state === 'complete' ? 'complete' : task.state === 'failed' ? 'failed' : 'pending') }}>
+                        {task.state}
+                      </span>
+                    </div>
+                    {Array.isArray(task.logs) && task.logs.length > 0 && (
+                      <div className="job-log-box">
+                        {task.logs.slice(-80).map((line, idx) => (
+                          <div key={`${task.id}-line-${idx}`} className="job-log-line">{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="inline-actions" style={{ marginTop: '8px' }}>
+                      {(task.state === 'queued' || task.state === 'running') && (
+                        <button className="btn-secondary" onClick={() => cancelMaintenanceTask(task.id)}>
+                          Terminate Task
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1497,26 +1584,18 @@ export default function App() {
           <div className="card">
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>🎬 Movies ({library.movies.length})</h2>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <select value={libraryFilter} onChange={(e) => setLibraryFilter(e.target.value)} className="btn-secondary" style={{ padding: '6px 10px' }}>
-                  <option value="all">All</option>
-                  <option value="needs_encode">Needs Encoding</option>
-                  <option value="needs_rename">Needs Renaming</option>
-                  <option value="encoded">Already Encoded</option>
-                </select>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch encode', 'Queueing encode movies')}
-                </button>
-                <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch rename', 'Queueing rename movies')}
-                </button>
-              </div>
+              <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
+              </button>
+              <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
+              </button>
             </div>
             {library.movies.length === 0 && !library.movies_path_exists ? (
               <p className="empty-state">{authedLoading ? 'Loading movies…' : 'Movies path is not available in the container.'}</p>
             ) : (
               <div className="gallery-grid">
-                {applyLibraryFilter(library.movies).map((item, i) => (
+                {library.movies.map((item, i) => (
                   <div key={`${item.path}-${i}`} className="media-card">
                     <div className="media-card-poster">
                       {item.poster ? (
@@ -1530,19 +1609,12 @@ export default function App() {
                         <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
                         {item.needs_encode && <span className="badge badge-warning">Encode</span>}
                         {item.needs_rename && <span className="badge badge-info">Rename</span>}
-                        {item.encoding_specs?.encoded && <span className="badge" style={{ backgroundColor: '#10b981' }}>✓ HEVC</span>}
                       </div>
                       <p className="media-card-overview">{item.overview || item.path}</p>
                       <div className="media-card-meta">
                         <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
                         {item.rating ? <span>★ {item.rating}</span> : null}
                       </div>
-                      {item.encoding_specs && (
-                        <div className="media-card-specs" style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #333' }}>
-                          {item.encoding_specs.codec && <div>Codec: {item.encoding_specs.codec}</div>}
-                          {item.encoding_specs.resolution && <div>Resolution: {item.encoding_specs.resolution} ({item.encoding_specs.quality_tier})</div>}
-                        </div>
-                      )}
                       <div className="media-card-actions">
                         <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
                           {maintenanceButtonLabel('Encode', 'Queueing encode item')}
@@ -1561,18 +1633,12 @@ export default function App() {
           <div className="card" style={{ marginTop: '16px' }}>
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <h2>📺 TV Shows ({library.tvshows.length})</h2>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <select value={libraryFilter} onChange={(e) => setLibraryFilter(e.target.value)} className="btn-secondary" style={{ padding: '6px 10px' }}>
-                  <option value="all">All</option>
-                  <option value="needs_encode">Needs Encoding</option>
-                  <option value="needs_rename">Needs Renaming</option>
-                  <option value="encoded">Already Encoded</option>
-                </select>
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch encode', 'Queueing encode tv')}
+                  {maintenanceButtonLabel('Batch encode TV shows', 'Queueing encode tv')}
                 </button>
                 <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch rename', 'Queueing rename tv')}
+                  {maintenanceButtonLabel('Batch rename TV shows', 'Queueing rename tv')}
                 </button>
               </div>
             </div>
@@ -1580,7 +1646,7 @@ export default function App() {
               <p className="empty-state">{authedLoading ? 'Loading TV shows…' : 'TV path is not available in the container.'}</p>
             ) : (
               <div className="gallery-grid">
-                {applyLibraryFilter(library.tvshows).map((item, i) => (
+                {library.tvshows.map((item, i) => (
                   <div key={`${item.path}-${i}`} className="media-card">
                     <div className="media-card-poster">
                       {item.poster ? (
@@ -1594,19 +1660,12 @@ export default function App() {
                         <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
                         {item.needs_encode && <span className="badge badge-warning">Encode</span>}
                         {item.needs_rename && <span className="badge badge-info">Rename</span>}
-                        {item.encoding_specs?.encoded && <span className="badge" style={{ backgroundColor: '#10b981' }}>✓ HEVC</span>}
                       </div>
                       <p className="media-card-overview">{item.overview || item.path}</p>
                       <div className="media-card-meta">
                         <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
                         {item.rating ? <span>★ {item.rating}</span> : null}
                       </div>
-                      {item.encoding_specs && (
-                        <div className="media-card-specs" style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #333' }}>
-                          {item.encoding_specs.codec && <div>Codec: {item.encoding_specs.codec}</div>}
-                          {item.encoding_specs.resolution && <div>Resolution: {item.encoding_specs.resolution} ({item.encoding_specs.quality_tier})</div>}
-                        </div>
-                      )}
                       <div className="media-card-actions">
                         <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
                           {maintenanceButtonLabel('Encode', 'Queueing encode item')}

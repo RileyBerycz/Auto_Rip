@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, render_template_string, jsonify
 from flask_cors import CORS
 
 from .routes.api import api_bp
@@ -12,7 +12,10 @@ from .services.state_store import StateStore
 
 
 def create_app() -> Flask:
-    app = Flask(__name__, static_folder="../static", static_url_path="")
+    # Determine static folder path
+    static_folder = Path(__file__).parent.parent / "static"
+    
+    app = Flask(__name__, static_folder=str(static_folder), static_url_path="/assets")
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config["BACKEND_HOST"] = "0.0.0.0"
     app.config["BACKEND_PORT"] = 7272
@@ -49,18 +52,49 @@ def create_app() -> Flask:
 
     app.register_blueprint(api_bp, url_prefix="/api")
 
-    # Serve React frontend; fallback to index.html for SPA routing
+    # Serve static files and SPA
     @app.route("/")
-    def serve_index():
-        return send_from_directory(app.static_folder, "index.html")
+    def index():
+        index_path = static_folder / "index.html"
+        if index_path.exists():
+            return send_from_directory(str(static_folder), "index.html")
+        else:
+            return render_template_string("""
+                <!DOCTYPE html>
+                <html>
+                <head><title>DvDRip</title></head>
+                <body style="background: #f0f0f0; padding: 20px; font-family: sans-serif;">
+                    <h1>Application Starting...</h1>
+                    <p>Frontend assets are being loaded. Please refresh in a moment.</p>
+                </body>
+                </html>
+            """), 503
 
     @app.route("/<path:path>")
     def serve_static(path):
-        # Try serving static file first
-        file_path = os.path.join(app.static_folder, path)
-        if os.path.isfile(file_path):
-            return send_from_directory(app.static_folder, path)
-        # Fallback to index.html for SPA routing
-        return send_from_directory(app.static_folder, "index.html")
+        # Skip API routes (should not reach here due to blueprint)
+        if path.startswith("api/"):
+            return jsonify({"ok": False, "error": "not found"}), 404
+        
+        # Try to serve as a static file first
+        file_path = static_folder / path
+        if file_path.exists() and file_path.is_file():
+            return send_from_directory(str(static_folder), path)
+        
+        # If not found, serve index.html for SPA routing
+        index_path = static_folder / "index.html"
+        if index_path.exists():
+            return send_from_directory(str(static_folder), "index.html")
+        else:
+            return render_template_string("""
+                <!DOCTYPE html>
+                <html>
+                <head><title>DvDRip</title></head>
+                <body style="background: #f0f0f0; padding: 20px; font-family: sans-serif;">
+                    <h1>Application Starting...</h1>
+                    <p>Frontend assets are being loaded. Please refresh in a moment.</p>
+                </body>
+                </html>
+            """), 503
 
     return app
