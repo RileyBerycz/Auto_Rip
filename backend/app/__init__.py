@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from flask import Flask, send_from_directory, render_template_string, jsonify
+from flask import Flask, send_from_directory, render_template_string, jsonify, make_response
 from flask_cors import CORS
 
 from .routes.api import api_bp
@@ -12,10 +12,14 @@ from .services.state_store import StateStore
 
 
 def create_app() -> Flask:
-    # Determine static folder path
-    static_folder = Path(__file__).parent.parent / "static"
-    
-    app = Flask(__name__, static_folder=str(static_folder), static_url_path="/assets")
+    # Determine static folder paths (dist root and assets subfolder)
+    static_root = Path(__file__).parent.parent / "static"
+    static_assets = static_root / "assets"
+    # If the build produced an 'assets' directory, serve it at /assets; otherwise
+    # fall back to serving the static root directory directly.
+    assets_folder = static_assets if static_assets.exists() else static_root
+
+    app = Flask(__name__, static_folder=str(assets_folder), static_url_path="/assets")
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config["BACKEND_HOST"] = "0.0.0.0"
     app.config["BACKEND_PORT"] = 7272
@@ -55,9 +59,22 @@ def create_app() -> Flask:
     # Serve static files and SPA
     @app.route("/")
     def index():
-        index_path = static_folder / "index.html"
+        index_path = static_root / "index.html"
         if index_path.exists():
-            return send_from_directory(str(static_folder), "index.html")
+            # Inject a tiny runtime snippet to set the frontend API URL in localStorage
+            # if the user hasn't already configured it. This avoids needing to rebuild
+            # the frontend when the backend URL is the same origin.
+            content = index_path.read_text(encoding="utf-8")
+            injection = (
+                "<script>try{if(!localStorage.getItem('dvdflix_api_url')){localStorage.setItem('dvdflix_api_url',window.location.origin);} }catch(e){};</script>"
+            )
+            if "</head>" in content:
+                content = content.replace("</head>", injection + "</head>", 1)
+            elif "</body>" in content:
+                content = content.replace("</body>", injection + "</body>", 1)
+            resp = make_response(content)
+            resp.headers["Content-Type"] = "text/html; charset=utf-8"
+            return resp
         else:
             return render_template_string("""
                 <!DOCTYPE html>
@@ -76,15 +93,32 @@ def create_app() -> Flask:
         if path.startswith("api/"):
             return jsonify({"ok": False, "error": "not found"}), 404
         
-        # Try to serve as a static file first
-        file_path = static_folder / path
-        if file_path.exists() and file_path.is_file():
-            return send_from_directory(str(static_folder), path)
+        # Try to serve as a static file first (check both root and assets)
+        root_file = static_root / path
+        if root_file.exists() and root_file.is_file():
+            return send_from_directory(str(static_root), path)
+
+        # If the path references the assets folder (or assets folder is separate),
+        # attempt to serve from static_assets. Normalize the filename when needed.
+        asset_candidate = static_assets / (path[len("assets/"): ] if path.startswith("assets/") else path)
+        if asset_candidate.exists() and asset_candidate.is_file():
+            filename = path[len("assets/"): ] if path.startswith("assets/") else path
+            return send_from_directory(str(static_assets), filename)
         
-        # If not found, serve index.html for SPA routing
-        index_path = static_folder / "index.html"
+        # If not found, serve index.html for SPA routing (inject runtime config)
+        index_path = static_root / "index.html"
         if index_path.exists():
-            return send_from_directory(str(static_folder), "index.html")
+            content = index_path.read_text(encoding="utf-8")
+            injection = (
+                "<script>try{if(!localStorage.getItem('dvdflix_api_url')){localStorage.setItem('dvdflix_api_url',window.location.origin);} }catch(e){};</script>"
+            )
+            if "</head>" in content:
+                content = content.replace("</head>", injection + "</head>", 1)
+            elif "</body>" in content:
+                content = content.replace("</body>", injection + "</body>", 1)
+            resp = make_response(content)
+            resp.headers["Content-Type"] = "text/html; charset=utf-8"
+            return resp
         else:
             return render_template_string("""
                 <!DOCTYPE html>
