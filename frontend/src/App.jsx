@@ -351,6 +351,17 @@ export default function App() {
     }
   }
 
+  // Auto-fetch Ollama models when settings provide an Ollama URL
+  useEffect(() => {
+    const url = settingsDraft?.OLLAMA_URL || setupForm?.settings?.OLLAMA_URL
+    if (!url) return
+    if (ollamaLoading) return
+    if (ollamaModels && ollamaModels.length > 0) return
+    // Defer to explicit user action if they are in the middle of setup/login.
+    fetchOllamaModels(url)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsDraft?.OLLAMA_URL, setupForm?.settings?.OLLAMA_URL])
+
   const saveSettings = async () => {
     if (!settingsDraft) return
     const resp = await fetch(`${apiUrl}/api/settings`, {

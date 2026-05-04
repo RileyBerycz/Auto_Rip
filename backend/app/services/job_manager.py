@@ -132,7 +132,11 @@ class JobManager:
 
         # Background monitor allows hands-off operation in the web app.
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
+        # Allow disabling the automatic monitor loop for testing or hosts
+        # that prefer manual control. Set DISABLE_AUTO_RIP=true in the
+        # environment to prevent the monitor from starting.
+        if os.environ.get("DISABLE_AUTO_RIP", "false").lower() not in ("1", "true", "yes"):
+            self.monitor_thread.start()
 
     def reconfigure(self, settings_overrides: dict[str, str]) -> None:
         with self.lock:

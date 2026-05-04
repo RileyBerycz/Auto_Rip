@@ -338,13 +338,22 @@ def setup_ollama_models() -> tuple:
                         if name:
                             models.append(name)
             elif isinstance(payload, dict):
-                # try common shapes
+                # try common shapes: { "models": [...] } or OpenAI-like { "object":"list","data":[...] }
                 if "models" in payload and isinstance(payload["models"], list):
                     for item in payload["models"]:
                         if isinstance(item, str):
                             models.append(item)
                         elif isinstance(item, dict):
                             name = item.get("name") or item.get("id") or item.get("model")
+                            if name:
+                                models.append(name)
+                elif "data" in payload and isinstance(payload["data"], list):
+                    for item in payload["data"]:
+                        if isinstance(item, str):
+                            models.append(item)
+                        elif isinstance(item, dict):
+                            # Ollama and some APIs embed model metadata under name/id/model
+                            name = item.get("name") or item.get("id") or item.get("model") or item.get("modelName")
                             if name:
                                 models.append(name)
                 else:
@@ -484,6 +493,7 @@ def capabilities() -> tuple:
         "lsdvd": bool(shutil.which("lsdvd")),
         "makemkvcon": _tool_exists(settings.makemkvcon_path),
         "eject": bool(shutil.which("eject")),
+        "handbrake": bool(shutil.which("HandBrakeCLI")),
     }
 
     # Use both configured drives and runtime-detected drives to assess availability.
@@ -613,9 +623,10 @@ def dashboard() -> tuple:
             "capabilities": {
                 "ok": True,
                 "capabilities": {
-                    "lsdvd": bool(shutil.which("lsdvd")),
-                    "makemkvcon": _tool_exists(settings.makemkvcon_path),
-                    "eject": bool(shutil.which("eject")),
+                        "lsdvd": bool(shutil.which("lsdvd")),
+                        "makemkvcon": _tool_exists(settings.makemkvcon_path),
+                        "eject": bool(shutil.which("eject")),
+                        "handbrake": bool(shutil.which("HandBrakeCLI")),
                 },
                 "drive_status": {drive: Path(drive).exists() for drive in sorted(set(list(settings.drives or []) + list(discover_optical_drives() or [])))},
                 "paths": {
