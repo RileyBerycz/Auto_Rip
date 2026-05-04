@@ -51,7 +51,8 @@ def run_makemkv(
     # makemkvcon syntax is: mkv <source> <title|all> <destination>.
     # Use explicit dev:/ path so each worker targets its intended optical drive.
     source = drive if drive.startswith("dev:") else f"dev:{drive}"
-    cmd = [makemkvcon_path, "mkv", source, "all", str(output_dir)]
+    # Use robot mode (-r) to avoid interactive prompts and improve automation.
+    cmd = [makemkvcon_path, "-r", "mkv", source, "all", str(output_dir)]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

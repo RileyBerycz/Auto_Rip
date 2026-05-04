@@ -87,6 +87,8 @@ export default function App() {
   const [showAllMovies, setShowAllMovies] = useState(false)
   const [showAllTV, setShowAllTV] = useState(false)
   const [showOnlyNeeds, setShowOnlyNeeds] = useState(true)
+  const [ollamaModels, setOllamaModels] = useState([])
+  const [ollamaLoading, setOllamaLoading] = useState(false)
   const [history, setHistory] = useState([])
   const [accounts, setAccounts] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
@@ -321,6 +323,31 @@ export default function App() {
       }
     } catch (err) {
       showMessage(`Drive detection failed: ${err.message}`, 'error')
+    }
+  }
+
+  const fetchOllamaModels = async (url) => {
+    if (!apiUrl) {
+      showMessage('Backend URL is required', 'error')
+      return
+    }
+    const target = (url || '').trim()
+    try {
+      setOllamaLoading(true)
+      const resp = await fetch(`${apiUrl}/api/setup/ollama-models?url=${encodeURIComponent(target)}`)
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok || !data?.ok) {
+        showMessage(data?.error || 'Failed to fetch Ollama models', 'error')
+        setOllamaModels([])
+        return
+      }
+      setOllamaModels(Array.isArray(data.models) ? data.models : [])
+      showMessage(`Found ${Array.isArray(data.models) ? data.models.length : 0} Ollama model(s)`, 'success')
+    } catch (err) {
+      showMessage('Failed to query Ollama: ' + (err.message || err), 'error')
+      setOllamaModels([])
+    } finally {
+      setOllamaLoading(false)
     }
   }
 
@@ -891,7 +918,15 @@ export default function App() {
               </div>
               <div className="form-group">
                 <label>Ollama Model</label>
-                <input value={setupForm.settings.OLLAMA_MODEL} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OLLAMA_MODEL: e.target.value } })} />
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input value={setupForm.settings.OLLAMA_MODEL} onChange={(e) => setSetupForm({ ...setupForm, settings: { ...setupForm.settings, OLLAMA_MODEL: e.target.value } })} />
+                  <button className="btn-secondary" onClick={() => fetchOllamaModels(setupForm.settings.OLLAMA_URL)} disabled={ollamaLoading || !setupForm.settings.OLLAMA_URL}>
+                    {ollamaLoading ? 'Scanning…' : 'Fetch Models'}
+                  </button>
+                </div>
+                {ollamaModels.length > 0 && (
+                  <small className="field-help">Detected models: {ollamaModels.join(', ')}</small>
+                )}
               </div>
               <div className="form-group">
                 <label>Confidence Threshold</label>
@@ -1540,15 +1575,26 @@ export default function App() {
                   </div>
                   <div className="form-group">
                     <label>Ollama URL</label>
-                    <input value={settingsDraft.OLLAMA_URL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_URL: e.target.value })} />
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input value={settingsDraft.OLLAMA_URL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_URL: e.target.value })} />
+                      <button className="btn-secondary" onClick={() => fetchOllamaModels(settingsDraft.OLLAMA_URL)} disabled={ollamaLoading || !settingsDraft?.OLLAMA_URL}>
+                        {ollamaLoading ? 'Scanning…' : 'Fetch Models'}
+                      </button>
+                    </div>
                   </div>
                   <div className="form-group">
                     <label>Ollama Model</label>
                     <select value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })}>
-                      <option value="qwen2.5:7b">qwen2.5:7b</option>
-                      <option value="qwen2.5:14b">qwen2.5:14b</option>
-                      <option value="llama2-13b">llama2-13b</option>
-                      <option value="gpt-4o-mini">gpt-4o-mini</option>
+                      {ollamaModels && ollamaModels.length > 0 ? (
+                        ollamaModels.map((m) => <option key={m} value={m}>{m}</option>)
+                      ) : (
+                        <>
+                          <option value="qwen2.5:7b">qwen2.5:7b</option>
+                          <option value="qwen2.5:14b">qwen2.5:14b</option>
+                          <option value="llama2-13b">llama2-13b</option>
+                          <option value="gpt-4o-mini">gpt-4o-mini</option>
+                        </>
+                      )}
                       <option value="">Custom (enter below)</option>
                     </select>
                     <input placeholder="Custom model (overrides selection)" value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })} />
