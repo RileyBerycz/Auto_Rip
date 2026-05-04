@@ -11,6 +11,7 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, Response
+import requests
 
 from dvdflix_core.config import discover_optical_drives
 from dvdflix_core.library import discover_media_items
@@ -303,6 +304,70 @@ def setup_detected_drives() -> tuple:
     return jsonify({"ok": True, "drives": drives, "csv": ",".join(drives)}), 200
 
 
+@api_bp.get("/setup/ollama-models")
+def setup_ollama_models() -> tuple:
+    """Attempt to query the configured Ollama URL (or provided url query param)
+    and return a simple list of model names. This endpoint is intentionally
+    unauthenticated so it can be used during initial setup.
+    Query param: url (optional) — overrides stored OLLAMA_URL.
+    """
+    manager = _manager()
+    url = (request.args.get("url") or manager.settings.ollama_url or "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "Ollama URL not configured"}), 400
+
+    candidates = ["/models", "/api/models", "/v1/models"]
+    models = None
+    last_error = None
+    for ep in candidates:
+        try:
+            full = url.rstrip("/") + ep
+            resp = requests.get(full, timeout=5)
+            if not resp.ok:
+                last_error = f"HTTP {resp.status_code} from {full}"
+                continue
+            payload = resp.json()
+            # payload may be list or dict; normalize to list of names
+            models = []
+            if isinstance(payload, list):
+                for item in payload:
+                    if isinstance(item, str):
+                        models.append(item)
+                    elif isinstance(item, dict):
+                        name = item.get("name") or item.get("id") or item.get("model")
+                        if name:
+                            models.append(name)
+            elif isinstance(payload, dict):
+                # try common shapes
+                if "models" in payload and isinstance(payload["models"], list):
+                    for item in payload["models"]:
+                        if isinstance(item, str):
+                            models.append(item)
+                        elif isinstance(item, dict):
+                            name = item.get("name") or item.get("id") or item.get("model")
+                            if name:
+                                models.append(name)
+                else:
+                    # as a fallback, use keys
+                    models = list(payload.keys())
+            if models is not None:
+                break
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+            continue
+
+    if models is None:
+        return jsonify({"ok": False, "error": f"could not query Ollama models: {last_error}"}), 502
+
+    # dedupe and return
+    seen = []
+    for m in models:
+        if m not in seen:
+            seen.append(m)
+
+    return jsonify({"ok": True, "models": seen}), 200
+
+
 @api_bp.post("/setup/initialize")
 def setup_initialize() -> tuple:
     store = _store()
@@ -420,7 +485,11 @@ def capabilities() -> tuple:
         "makemkvcon": _tool_exists(settings.makemkvcon_path),
         "eject": bool(shutil.which("eject")),
     }
-    drive_status = {drive: Path(drive).exists() for drive in settings.drives}
+
+    # Use both configured drives and runtime-detected drives to assess availability.
+    detected = discover_optical_drives()
+    all_drives = sorted(set(list(settings.drives or []) + list(detected or [])))
+    drive_status = {drive: Path(drive).exists() for drive in all_drives}
 
     movies_ok = settings.movies_path.exists()
     tv_ok = settings.tv_path.exists()
@@ -548,7 +617,7 @@ def dashboard() -> tuple:
                     "makemkvcon": _tool_exists(settings.makemkvcon_path),
                     "eject": bool(shutil.which("eject")),
                 },
-                "drive_status": {drive: Path(drive).exists() for drive in settings.drives},
+                "drive_status": {drive: Path(drive).exists() for drive in sorted(set(list(settings.drives or []) + list(discover_optical_drives() or [])))},
                 "paths": {
                     "movies": {"path": str(settings.movies_path), "exists": settings.movies_path.exists()},
                     "tv": {"path": str(settings.tv_path), "exists": settings.tv_path.exists()},

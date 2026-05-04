@@ -1,4 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="16" fill="#0ea5a4"/>
-  <text x="50" y="56" font-size="44" text-anchor="middle" fill="white" font-family="Arial, Helvetica, sans-serif">DV</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc" />
+      <stop offset="50%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+
+    <linearGradient id="slash" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="64" height="64" rx="14" fill="#020617" />
+
+  <!-- Optical disc -->
+  <circle cx="32" cy="32" r="22" fill="url(#disc)" />
+
+  <!-- Inner disc rings -->
+  <circle cx="32" cy="32" r="15" fill="none" stroke="#dbeafe" stroke-opacity="0.45" stroke-width="1.5" />
+  <circle cx="32" cy="32" r="8" fill="none" stroke="#dbeafe" stroke-opacity="0.5" stroke-width="1.2" />
+
+  <!-- Center hole -->
+  <circle cx="32" cy="32" r="4" fill="#020617" />
+
+  <!-- Rip slash -->
+  <path
+    d="M20 46 L46 20"
+    stroke="url(#slash)"
+    stroke-width="5"
+    stroke-linecap="round"
+  />
+
+  <!-- Digital extraction pixels -->
+  <rect x="44" y="16" width="3" height="3" rx="1" fill="#e0f2fe" />
+  <rect x="49" y="21" width="2.5" height="2.5" rx="0.8" fill="#bae6fd" />
+  <rect x="14" y="42" width="2.5" height="2.5" rx="0.8" fill="#7dd3fc" />
+  <rect x="18" y="47" width="3" height="3" rx="1" fill="#38bdf8" />
 </svg>
