@@ -12,6 +12,12 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN set -eux; \
+        # Enable contrib and non-free repositories so libdvd-pkg (libdvdcss) can be installed
+        printf '%s\n' \
+            'deb http://deb.debian.org/debian trixie main contrib non-free' \
+            'deb http://deb.debian.org/debian-security trixie-security main contrib non-free' \
+            'deb http://deb.debian.org/debian trixie-updates main contrib non-free' \
+            > /etc/apt/sources.list.d/non-free.list; \
         apt-get update; \
         apt-get install -y --no-install-recommends \
             lsdvd \
@@ -57,6 +63,9 @@ RUN set -eux; \
         make -j"$(nproc)"; \
         make install; \
         ldconfig; \
+        # Ensure libdvdcss is available for encrypted DVD support via libdvd-pkg
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libdvd-pkg; \
+        DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive libdvd-pkg || true; \
         rm -rf /tmp/*; \
         command -v makemkvcon >/dev/null; \
         rm -rf /var/lib/apt/lists/*
