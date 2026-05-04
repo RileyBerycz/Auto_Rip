@@ -4,7 +4,7 @@ const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
-const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'history', 'accounts']
+const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'movies', 'tv', 'history', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -84,6 +84,9 @@ export default function App() {
   const [setupLoading, setSetupLoading] = useState(false)
   const [authedLoading, setAuthedLoading] = useState(false)
   const [authedLoaded, setAuthedLoaded] = useState(false)
+  const [showAllMovies, setShowAllMovies] = useState(false)
+  const [showAllTV, setShowAllTV] = useState(false)
+  const [showOnlyNeeds, setShowOnlyNeeds] = useState(true)
   const [history, setHistory] = useState([])
   const [accounts, setAccounts] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
@@ -103,6 +106,18 @@ export default function App() {
   const effectiveApiUrl = apiUrl
   const eventSource = useMemo(() => token ? new EventSource(`${effectiveApiUrl}/api/events?token=${token}`) : null, [effectiveApiUrl, token])
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {}
+
+  // Filtered library lists (show only items needing action by default)
+  const moviesFiltered = (library?.movies || []).filter((it) => {
+    if (!showOnlyNeeds) return true
+    return Boolean(it?.needs_encode) || Boolean(it?.needs_rename)
+  })
+  const tvFiltered = (library?.tvshows || []).filter((it) => {
+    if (!showOnlyNeeds) return true
+    return Boolean(it?.needs_encode) || Boolean(it?.needs_rename)
+  })
+  const moviesToShow = showAllMovies ? moviesFiltered : moviesFiltered.slice(0, 10)
+  const tvToShow = showAllTV ? tvFiltered : tvFiltered.slice(0, 10)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -990,6 +1005,8 @@ export default function App() {
                 {p === 'ripper-status' && '⚙️ Ripper'}
                 {p === 'settings' && '⚡ Settings'}
                 {p === 'library' && '📚 Library'}
+                {p === 'movies' && '🎬 Movies'}
+                {p === 'tv' && '📺 TV Shows'}
                 {p === 'history' && '🕘 History'}
                 {p === 'accounts' && '👤 Accounts'}
               </button>
@@ -1120,6 +1137,70 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {activePage === 'movies' && (
+        <div className="content">
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2>🎬 Movies (all)</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
+                </button>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
+                </button>
+                <button className="btn-secondary" onClick={() => setActivePage('library')}>Back to library</button>
+              </div>
+            </div>
+            <div className="gallery-grid" style={{ marginTop: '12px' }}>
+              {(library.movies || []).map((item, i) => (
+                <div key={`${item.path}-${i}`} className="media-card">
+                  <div className="media-card-poster">{item.poster ? <img src={item.poster} alt={`${item.title} poster`} /> : <div className="media-card-placeholder">No poster</div>}</div>
+                  <div className="media-card-body">
+                    <div className="media-card-title-row"><h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>{item.needs_encode && <span className="badge badge-warning">Encode</span>}{item.needs_rename && <span className="badge badge-info">Rename</span>}</div>
+                    <p className="media-card-overview">{item.overview || item.path}</p>
+                    <div className="media-card-meta"><span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>{item.rating ? <span>★ {item.rating}</span> : null}</div>
+                    <div className="media-card-actions"><button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading}>{maintenanceButtonLabel('Encode', 'Queueing encode item')}</button><button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} style={{ marginLeft: '8px' }}>{maintenanceButtonLabel('Rename', 'Queueing rename item')}</button></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePage === 'tv' && (
+        <div className="content">
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2>📺 TV Shows (all)</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch encode TV shows', 'Queueing encode tv')}
+                </button>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch rename TV shows', 'Queueing rename tv')}
+                </button>
+                <button className="btn-secondary" onClick={() => setActivePage('library')}>Back to library</button>
+              </div>
+            </div>
+            <div className="gallery-grid" style={{ marginTop: '12px' }}>
+              {(library.tvshows || []).map((item, i) => (
+                <div key={`${item.path}-${i}`} className="media-card">
+                  <div className="media-card-poster">{item.poster ? <img src={item.poster} alt={`${item.title} poster`} /> : <div className="media-card-placeholder">No poster</div>}</div>
+                  <div className="media-card-body">
+                    <div className="media-card-title-row"><h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>{item.needs_encode && <span className="badge badge-warning">Encode</span>}{item.needs_rename && <span className="badge badge-info">Rename</span>}</div>
+                    <p className="media-card-overview">{item.overview || item.path}</p>
+                    <div className="media-card-meta"><span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>{item.rating ? <span>★ {item.rating}</span> : null}</div>
+                    <div className="media-card-actions"><button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>{maintenanceButtonLabel('Encode', 'Queueing encode item')}</button><button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading} style={{ marginLeft: '8px' }}>{maintenanceButtonLabel('Rename', 'Queueing rename item')}</button></div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1463,7 +1544,14 @@ export default function App() {
                   </div>
                   <div className="form-group">
                     <label>Ollama Model</label>
-                    <input value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })} />
+                    <select value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })}>
+                      <option value="qwen2.5:7b">qwen2.5:7b</option>
+                      <option value="qwen2.5:14b">qwen2.5:14b</option>
+                      <option value="llama2-13b">llama2-13b</option>
+                      <option value="gpt-4o-mini">gpt-4o-mini</option>
+                      <option value="">Custom (enter below)</option>
+                    </select>
+                    <input placeholder="Custom model (overrides selection)" value={settingsDraft.OLLAMA_MODEL || ''} onChange={(e) => setSettingsDraft({ ...settingsDraft, OLLAMA_MODEL: e.target.value })} />
                   </div>
                   <div className="form-group">
                     <label>Runtime Tolerance Minutes</label>
@@ -1583,56 +1671,75 @@ export default function App() {
 
           <div className="card">
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-              <h2>🎬 Movies ({library.movies.length})</h2>
-              <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
-                {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
-              </button>
-              <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
-                {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
-              </button>
+              <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
+                <h2>🎬 Movies ({library.movies.length})</h2>
+                <label style={{display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem'}}>
+                  <input type="checkbox" checked={showOnlyNeeds} onChange={(e) => setShowOnlyNeeds(e.target.checked)} />
+                  Only show needs (encode / rename)
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
+                </button>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                  {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
+                </button>
+                <button className="btn-secondary" onClick={() => setActivePage('movies')}>View all movies</button>
+              </div>
             </div>
             {library.movies.length === 0 && !library.movies_path_exists ? (
               <p className="empty-state">{authedLoading ? 'Loading movies…' : 'Movies path is not available in the container.'}</p>
             ) : (
-              <div className="gallery-grid">
-                {library.movies.map((item, i) => (
-                  <div key={`${item.path}-${i}`} className="media-card">
-                    <div className="media-card-poster">
-                      {item.poster ? (
-                        <img src={item.poster} alt={`${item.title} poster`} />
-                      ) : (
-                        <div className="media-card-placeholder">No poster</div>
-                      )}
+              <>
+                <div className="gallery-grid">
+                  {moviesToShow.map((item, i) => (
+                    <div key={`${item.path}-${i}`} className="media-card">
+                      <div className="media-card-poster">
+                        {item.poster ? (
+                          <img src={item.poster} alt={`${item.title} poster`} />
+                        ) : (
+                          <div className="media-card-placeholder">No poster</div>
+                        )}
+                      </div>
+                      <div className="media-card-body">
+                        <div className="media-card-title-row">
+                          <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
+                          {item.needs_encode && <span className="badge badge-warning">Encode</span>}
+                          {item.needs_rename && <span className="badge badge-info">Rename</span>}
+                        </div>
+                        <p className="media-card-overview">{item.overview || item.path}</p>
+                        <div className="media-card-meta">
+                          <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
+                          {item.rating ? <span>★ {item.rating}</span> : null}
+                        </div>
+                        <div className="media-card-actions">
+                          <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
+                            {maintenanceButtonLabel('Encode', 'Queueing encode item')}
+                          </button>
+                          <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Rename this library item: ${item.path}`}>
+                            {maintenanceButtonLabel('Rename', 'Queueing rename item')}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="media-card-body">
-                      <div className="media-card-title-row">
-                        <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
-                        {item.needs_encode && <span className="badge badge-warning">Encode</span>}
-                        {item.needs_rename && <span className="badge badge-info">Rename</span>}
-                      </div>
-                      <p className="media-card-overview">{item.overview || item.path}</p>
-                      <div className="media-card-meta">
-                        <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
-                        {item.rating ? <span>★ {item.rating}</span> : null}
-                      </div>
-                      <div className="media-card-actions">
-                        <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
-                          {maintenanceButtonLabel('Encode', 'Queueing encode item')}
-                        </button>
-                        <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Rename this library item: ${item.path}`}>
-                          {maintenanceButtonLabel('Rename', 'Queueing rename item')}
-                        </button>
-                      </div>
-                    </div>
+                  ))}
+                </div>
+                {moviesFiltered.length > 10 && !showAllMovies && (
+                  <div style={{ marginTop: '12px' }}>
+                    <button className="btn-secondary" onClick={() => setShowAllMovies(true)}>Show all {moviesFiltered.length} movies</button>
+                    <button className="btn-secondary" onClick={() => setActivePage('movies')} style={{ marginLeft: '8px' }}>Open movies page</button>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
 
           <div className="card" style={{ marginTop: '16px' }}>
             <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-              <h2>📺 TV Shows ({library.tvshows.length})</h2>
+              <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
+                <h2>📺 TV Shows ({library.tvshows.length})</h2>
+              </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
                   {maintenanceButtonLabel('Batch encode TV shows', 'Queueing encode tv')}
@@ -1640,44 +1747,53 @@ export default function App() {
                 <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
                   {maintenanceButtonLabel('Batch rename TV shows', 'Queueing rename tv')}
                 </button>
+                <button className="btn-secondary" onClick={() => setActivePage('tv')}>View all TV</button>
               </div>
             </div>
             {library.tvshows.length === 0 && !library.tv_path_exists ? (
               <p className="empty-state">{authedLoading ? 'Loading TV shows…' : 'TV path is not available in the container.'}</p>
             ) : (
-              <div className="gallery-grid">
-                {library.tvshows.map((item, i) => (
-                  <div key={`${item.path}-${i}`} className="media-card">
-                    <div className="media-card-poster">
-                      {item.poster ? (
-                        <img src={item.poster} alt={`${item.title} poster`} />
-                      ) : (
-                        <div className="media-card-placeholder">No poster</div>
-                      )}
+              <>
+                <div className="gallery-grid">
+                  {tvToShow.map((item, i) => (
+                    <div key={`${item.path}-${i}`} className="media-card">
+                      <div className="media-card-poster">
+                        {item.poster ? (
+                          <img src={item.poster} alt={`${item.title} poster`} />
+                        ) : (
+                          <div className="media-card-placeholder">No poster</div>
+                        )}
+                      </div>
+                      <div className="media-card-body">
+                        <div className="media-card-title-row">
+                          <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
+                          {item.needs_encode && <span className="badge badge-warning">Encode</span>}
+                          {item.needs_rename && <span className="badge badge-info">Rename</span>}
+                        </div>
+                        <p className="media-card-overview">{item.overview || item.path}</p>
+                        <div className="media-card-meta">
+                          <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
+                          {item.rating ? <span>★ {item.rating}</span> : null}
+                        </div>
+                        <div className="media-card-actions">
+                          <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
+                            {maintenanceButtonLabel('Encode', 'Queueing encode item')}
+                          </button>
+                          <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
+                            {maintenanceButtonLabel('Rename', 'Queueing rename item')}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="media-card-body">
-                      <div className="media-card-title-row">
-                        <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
-                        {item.needs_encode && <span className="badge badge-warning">Encode</span>}
-                        {item.needs_rename && <span className="badge badge-info">Rename</span>}
-                      </div>
-                      <p className="media-card-overview">{item.overview || item.path}</p>
-                      <div className="media-card-meta">
-                        <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
-                        {item.rating ? <span>★ {item.rating}</span> : null}
-                      </div>
-                      <div className="media-card-actions">
-                        <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
-                          {maintenanceButtonLabel('Encode', 'Queueing encode item')}
-                        </button>
-                        <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
-                          {maintenanceButtonLabel('Rename', 'Queueing rename item')}
-                        </button>
-                      </div>
-                    </div>
+                  ))}
+                </div>
+                {tvFiltered.length > 10 && !showAllTV && (
+                  <div style={{ marginTop: '12px' }}>
+                    <button className="btn-secondary" onClick={() => setShowAllTV(true)}>Show all {tvFiltered.length} TV shows</button>
+                    <button className="btn-secondary" onClick={() => setActivePage('tv')} style={{ marginLeft: '8px' }}>Open TV page</button>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
 
