@@ -43,6 +43,8 @@ In Dockge, include both files in the stack and set host path envs such as `HOST_
 
 Tip: if `DRIVES` is left blank in setup/settings, the backend now auto-detects optical devices from `/dev/sr*` (and common aliases `/dev/cdrom`, `/dev/dvd`) that are visible inside the container.
 
+Note: the backend can manage multiple attached drives inside a single container, as long as the container has access to the device nodes and the `DRIVES` list includes them or is left blank for auto-discovery. If you want one container per drive, that requires separate compose services or separate `docker run` containers with distinct `--device` mappings; compose will not magically allocate new drive devices across replicas.
+
 ## One-File Full Auto-Ripper (Dedicated Ripper Hosts)
 
 If this machine is dedicated to ripping, use `docker-compose.full.yml` for a single-file deployment:

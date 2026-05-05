@@ -12,4 +12,5 @@ services:
       - ${HOST_TV_PATH}:${TV_PATH:-/media/tvshows}
       - ${HOST_TEMP_RIP_PATH}:${TEMP_RIP_PATH:-/media/tmp}
     environment:
-      DRIVES: ${DRIVES:-/dev/sr0,/dev/sr1,/dev/sr2}
+      # If DRIVES is left blank, the backend will auto-discover /dev/sr* devices visible inside the container.
+      DRIVES: ${DRIVES:-}
