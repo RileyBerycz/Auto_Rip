@@ -121,8 +121,9 @@ class JobManager:
         self._stop_event = threading.Event()
         self.auto_eject_cooldown_seconds = 90
 
-        # Encode queue mirrors legacy script behavior: one encode worker, FIFO queue.
-        self.encode_executor = ThreadPoolExecutor(max_workers=1)
+        # Encode queue: scale workers with drive count (or configurable max).
+        max_encode_workers = int(os.getenv("ENCODER_MAX_WORKERS", max(1, len(self.settings.drives) or 1)))
+        self.encode_executor = ThreadPoolExecutor(max_workers=max_encode_workers)
         self.encode_queue_lock = threading.Lock()
         self.encode_enqueued_paths: set[str] = set()
         self.encode_pending_count_by_job: dict[str, int] = {}

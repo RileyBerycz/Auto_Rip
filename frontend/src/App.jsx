@@ -101,6 +101,8 @@ export default function App() {
   const [searchMediaType, setSearchMediaType] = useState('movie')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [overrideSubmitting, setOverrideSubmitting] = useState(false)
+  const [overrideError, setOverrideError] = useState('')
   const [historyEditModal, setHistoryEditModal] = useState(null)
   const authedRefreshInFlight = useRef(false)
   const setupRefreshInFlight = useRef(false)
@@ -592,18 +594,24 @@ export default function App() {
   }
 
   const overrideJobTitle = async (jobId, title, year, mediaType) => {
-    const resp = await fetch(`${apiUrl}/api/jobs/${jobId}/override-title`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ title, year, media_type: mediaType }),
-    })
-    if (resp.ok) {
-      showMessage('Title overridden successfully', 'success')
-      setOverrideModal(null)
-      setSearchQuery('')
-      setSearchResults([])
-    } else {
-      showMessage('Failed to override title', 'error')
+    setOverrideSubmitting(true);
+    setOverrideError('');
+    try {
+      const res = await fetch(`${effectiveApiUrl}/api/jobs/${jobId}/override-title`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ title, year, media_type: mediaType }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to override title');
+      fetchAuthedData();
+      setOverrideModal(null);
+      setSearchResults([]);
+      setSearchQuery('');
+    } catch (err) {
+      setOverrideError(err.message || 'Unknown error');
+    } finally {
+      setOverrideSubmitting(false);
     }
   }
 
@@ -1836,9 +1844,7 @@ export default function App() {
                           <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
                             {maintenanceButtonLabel('Encode', 'Queueing encode item')}
                           </button>
-                          <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
-                            {maintenanceButtonLabel('Rename', 'Queueing rename item')}
-                          </button>
+                          <button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading} style={{ marginLeft: '8px' }}>{maintenanceButtonLabel('Rename', 'Queueing rename item')}</button>
                         </div>
                       </div>
                     </div>
@@ -2062,9 +2068,10 @@ export default function App() {
                           searchMediaType
                         )
                       }
+                      disabled={overrideSubmitting}
                       title="Apply this TMDB result to the job and move the output to the library"
                     >
-                      Select
+                      {overrideSubmitting ? 'Applying…' : 'Select'}
                     </button>
                   </div>
                 ))}
@@ -2074,6 +2081,7 @@ export default function App() {
             {searchQuery && !searching && searchResults.length === 0 && (
               <p className="empty-state">No results found. Try a different search.</p>
             )}
+            {overrideError && <div className="alert alert-error">{overrideError}</div>}
           </div>
 
           <div className="modal-footer">

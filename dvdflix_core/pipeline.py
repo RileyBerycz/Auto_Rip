@@ -35,7 +35,8 @@ class RipPipeline:
             enable_web_search=settings.enable_web_search,
             searxng_url=settings.searxng_url,
         )
-        self.identify_lock = threading.Lock()
+        # Removed global identify_lock to allow concurrent identification across drives.
+        # If GPU contention becomes an issue, control concurrency at the Ollama client or queue level instead.
 
     def run_for_drive(
         self,
@@ -69,9 +70,7 @@ class RipPipeline:
                     progress_cb(JobState.canceled.value, 100, "Cancelled during identification")
                 return job
 
-            # Keep identification serialized to avoid GPU contention in Ollama.
-            with self.identify_lock:
-                identified = self.identifier.identify(disc)
+            identified = self.identifier.identify(disc)
 
             confidence_pct = int(round(float(identified.confidence or 0.0) * 100))
             needs_manual_review = confidence_pct < int(self.settings.identify_min_confidence)
