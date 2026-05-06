@@ -303,6 +303,19 @@ Then set `SEARXNG_URL=http://searxng:8888` in `.env` before initializing setup.
 	- Device mappings (for `/dev/sr*`)
 	- Host bind mounts for media paths
 
+## Docker Folder Permissions
+
+When using Docker, ensure the container has write access to your media folders:
+
+```bash
+# Fix ownership for the dvdflix container user (UID/GID 1000)
+sudo chown -R 1000:1000 /path/to/your/media/folder
+# Or allow read-write for all (simpler but less secure)
+sudo chmod -R a+rw /path/to/your/media/folder
+```
+
+In Dockge, you can also add a `user: "1000:1000"` line to the backend service in your compose file if your media folders are owned by a different user.
+
 ## Notes
 
 - Runtime tolerance defaults to `+-8` minutes (PAL speed compensation).

@@ -4,7 +4,7 @@ const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
-const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'movies', 'tv', 'history', 'accounts']
+const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'movies', 'tv', 'history', 'accounts', 'log-viewer']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -94,6 +94,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null)
   const [newAccountForm, setNewAccountForm] = useState({ username: '', password: '', is_admin: false })
   const [sseConnected, setSseConnected] = useState(false)
+  
+  // Log viewer
+  const [availableLogs, setAvailableLogs] = useState([])
+  const [selectedLog, setSelectedLog] = useState('')
+  const [logLines, setLogLines] = useState([])
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsError, setLogsError] = useState('')
   
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
@@ -696,7 +703,7 @@ export default function App() {
 
   const driveStatusTone = (status) => {
     if (status === 'ready' || status === 'encrypted') return 'ok'
-    if (status === 'empty') return 'warn'
+    if (status === 'empty' || status === 'ejected') return 'warn'
     if (status === 'missing' || status === 'error' || status === 'tool-missing') return 'bad'
     return 'info'
   }
@@ -737,6 +744,40 @@ export default function App() {
     showMessage(resp.ok ? 'Task cancel requested' : (data.error || 'Failed to cancel task'), resp.ok ? 'info' : 'error')
     await fetchAuthedData()
   }
+
+  const fetchLogs = async () => {
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      const resp = await fetch(`${apiUrl}/api/logs`, { headers: authHeaders });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to fetch logs');
+      setAvailableLogs(data.logs || []);
+    } catch (err) {
+      setLogsError(err.message || 'Failed to load logs');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const fetchLogContent = async (name) => {
+    if (!name) return;
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      const resp = await fetch(`${apiUrl}/api/logs/${encodeURIComponent(name)}`, { headers: authHeaders });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to load log');
+      setLogLines(data.lines || []);
+    } catch (err) {
+      setLogsError(err.message || 'Failed to load log content');
+      setLogLines([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
 
   const allLogs = useMemo(() => {
     const ripLogs = (jobs || []).flatMap((job) => {
@@ -1063,6 +1104,7 @@ export default function App() {
                 {p === 'tv' && '📺 TV Shows'}
                 {p === 'history' && '🕘 History'}
                 {p === 'accounts' && '👤 Accounts'}
+                {p === 'log-viewer' && '📄 Log Viewer'}
               </button>
             ))}
           </nav>
@@ -1447,15 +1489,20 @@ export default function App() {
                   <div className="drive-status-item" key={`status-${d.drive}`}>
                     <div>
                       <div className="drive-status-title">{d.drive}</div>
-                      <div className="drive-status-meta">{d.detail}</div>
+                      <div className="drive-status-meta">
+                        {d.disc_label && <span>Disc: {d.disc_label} | </span>}
+                        {d.is_ejected ? 'Ejected' : d.detail}
+                      </div>
                     </div>
                     <div className="drive-status-actions">
-                      <span className={`badge ${d.status === 'ready' ? 'ok' : d.status === 'empty' ? 'warn' : 'bad'}`}>
-                        {d.status}
+                      <span className={`badge ${d.status === 'ready' ? 'ok' : d.status === 'empty' || d.status === 'ejected' ? 'warn' : 'bad'}`}>
+                        {d.is_ejected ? 'ejected' : d.status}
                       </span>
-                      <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
-                        Eject
-                      </button>
+                      {d.has_disc && (
+                        <button className="btn-secondary" onClick={() => ejectSelectedDrive(d.drive)}>
+                          Eject
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1784,6 +1831,20 @@ export default function App() {
                           </button>
                           <button className="btn-secondary" onClick={() => runRenameItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Rename this library item: ${item.path}`}>
                             {maintenanceButtonLabel('Rename', 'Queueing rename item')}
+                          </button>
+                          <button 
+                            className="btn-secondary" 
+                            onClick={() => {
+                              setOverrideModal({ 
+                                jobId: null, 
+                                jobTitle: item.title,
+                                path: item.path,
+                                scope: 'movies'
+                              });
+                            }}
+                            title="Manually rename this item"
+                          >
+                            ✏️ Manual Rename
                           </button>
                         </div>
                       </div>

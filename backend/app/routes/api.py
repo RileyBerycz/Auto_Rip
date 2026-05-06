@@ -1135,3 +1135,116 @@ def events() -> Response:
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@api_bp.get("/logs")
+@require_auth
+def list_logs() -> tuple:
+    """List available log files in the backend's log directory."""
+    log_dir = Path("/app/logs")
+    if not log_dir.exists():
+        return jsonify({"ok": True, "logs": [], "live_log": None}), 200
+
+    entries = []
+    for p in sorted(log_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_file() and p.suffix in {".log", ".txt"}:
+            entries.append({
+                "name": p.name,
+                "size": p.stat().st_size,
+                "mtime": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+            })
+    return jsonify({"ok": True, "logs": entries, "live_log": "backend.log"}), 200
+
+
+@api_bp.get("/logs/<name>")
+@require_auth
+def get_log(name: str) -> tuple:
+    """Return the last N lines of a log file."""
+    safe = "".join(ch for ch in name if ch.isalnum() or ch in "._-")
+    if safe != name:
+        return jsonify({"ok": False, "error": "Invalid log name"}), 400
+
+    log_dir = Path("/app/logs")
+    target = (log_dir / safe).resolve()
+    if not str(target).startswith(str(log_dir.resolve())):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
+
+    if not target.exists():
+        return jsonify({"ok": False, "error": "Log not found"}), 404
+
+    raw_limit = request.args.get("limit", "500")
+    try:
+        limit = max(10, min(5000, int(raw_limit)))
+    except ValueError:
+        limit = 500
+
+    try:
+        lines = target.read_text(errors="replace").splitlines()
+        tail = lines[-limit:]
+        return jsonify({"ok": True, "name": name, "lines": tail, "total_lines": len(lines)}), 200
+    except OSError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@api_bp.post("/library/rename-item")
+@require_auth
+def rename_item() -> tuple:
+    """Manually rename a single library item."""
+    manager = _manager()
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "movies")).strip().lower()
+    rel_path = str(payload.get("path", "")).strip()
+
+    if scope not in {"movies", "tv"}:
+        return jsonify({"ok": False, "error": "scope must be movies or tv"}), 400
+
+    root = manager.settings.movies_path if scope == "movies" else manager.settings.tv_path
+    try:
+        target = _resolve_library_path(root, rel_path)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if not target.exists():
+        return jsonify({"ok": False, "error": f"Path not found: {target}"}), 404
+
+    # Queue a rename task for this single item
+    script_path = Path("/app/scripts/rename_library.py")
+    if not script_path.exists():
+        return jsonify({"ok": False, "error": f"Missing script: {script_path}"}), 500
+
+    cmd = [sys.executable, str(script_path), "--path", str(target)]
+    task = _create_task("rename-item", cmd)
+    _task_executor.submit(_run_task, task["id"])
+    return jsonify({"ok": True, "task_id": task["id"]}), 202
+
+
+@api_bp.get("/thumbnail")
+@require_auth
+def thumbnail() -> Response:
+    """Serve a thumbnail image from the library by relative path."""
+    rel = request.args.get("path", "").strip()
+    scope = request.args.get("scope", "movies").strip().lower()
+    if scope not in {"movies", "tv"}:
+        return jsonify({"ok": False, "error": "scope must be movies or tv"}), 400
+
+    manager = _manager()
+    root = manager.settings.movies_path if scope == "movies" else manager.settings.tv_path
+    try:
+        target = _resolve_library_path(root, rel)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    # Look for common thumbnail files
+    candidates = [
+        target.with_suffix(".jpg"),
+        target.with_suffix(".png"),
+        target / "poster.jpg",
+        target / "poster.png",
+        Path(str(target) + "-poster.jpg"),
+    ]
+    found = next((p for p in candidates if p.exists()), None)
+    if not found:
+        return jsonify({"ok": False, "error": "thumbnail not found"}), 404
+
+    mime = "image/jpeg" if found.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    return Response(found.read_bytes(), mimetype=mime)

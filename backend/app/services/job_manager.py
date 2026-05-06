@@ -45,6 +45,8 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
             "readable": False,
             "status": "missing",
             "detail": "Drive device node not found",
+            "disc_label": None,
+            "is_ejected": False,
         }
 
     try:
@@ -52,6 +54,12 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
         stderr = (proc.stderr or "").strip()
         lower = stderr.lower()
         if proc.returncode == 0:
+            # Try to extract disc label from lsdvd output
+            disc_label = None
+            for line in (proc.stdout or "").splitlines():
+                if line.startswith("Disc Title:"):
+                    disc_label = line.split(":", 1)[1].strip()
+                    break
             return {
                 "drive": drive,
                 "exists": True,
@@ -59,16 +67,39 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
                 "readable": True,
                 "status": "ready",
                 "detail": "Disc detected and readable",
+                "disc_label": disc_label,
+                "is_ejected": False,
             }
 
         if "no medium found" in lower or "can't open disc" in lower:
+            # Check if drive was recently ejected by checking if makemkvcon can see it
+            try:
+                mk_proc = subprocess.run(
+                    ["makemkvcon", "-r", "info", f"dev:{drive}"],
+                    capture_output=True, text=True, check=False, timeout=5
+                )
+                if "DRV:0,0," in mk_proc.stdout:  # Drive exists but no disc
+                    return {
+                        "drive": drive,
+                        "exists": True,
+                        "has_disc": False,
+                        "readable": False,
+                        "status": "empty",
+                        "detail": "Drive is empty - insert a disc",
+                        "disc_label": None,
+                        "is_ejected": False,
+                    }
+            except Exception:
+                pass
             return {
                 "drive": drive,
                 "exists": True,
                 "has_disc": False,
                 "readable": False,
                 "status": "empty",
-                "detail": "Drive is empty",
+                "detail": "Drive is empty - insert a disc",
+                "disc_label": None,
+                "is_ejected": False,
             }
 
         if "no css library available" in lower or "encrypted dvd support unavailable" in lower:
@@ -79,6 +110,8 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
                 "readable": True,
                 "status": "encrypted",
                 "detail": "Encrypted disc detected; metadata is limited but rip via MakeMKV is allowed",
+                "disc_label": None,
+                "is_ejected": False,
             }
 
         return {
@@ -88,6 +121,8 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
             "readable": False,
             "status": "error",
             "detail": stderr or "Unknown lsdvd error",
+            "disc_label": None,
+            "is_ejected": False,
         }
     except FileNotFoundError:
         return {
@@ -97,6 +132,8 @@ def probe_drive_status(drive: str) -> dict[str, str | bool]:
             "readable": False,
             "status": "tool-missing",
             "detail": "lsdvd not installed",
+            "disc_label": None,
+            "is_ejected": False,
         }
 
 
