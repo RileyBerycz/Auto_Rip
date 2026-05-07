@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .clients import OllamaClient, TmdbClient
+from .clients_openrouter import OpenRouterClient
 from .crosscheck import MetadataCrossChecker
 from .disc_cache import DiscCache
 from .heuristics import is_probable_tv_disc, pick_feature_track_runtime
@@ -24,12 +25,16 @@ class DiscIdentifier:
         opensubtitles_api_key: str = "",
         enable_web_search: bool = False,
         searxng_url: str = "",
+        ai_provider: str = "ollama",
+        openrouter: OpenRouterClient | None = None,
     ) -> None:
         self.cache = cache
         self.ollama = ollama
+        self.openrouter = openrouter
         self.tmdb = tmdb
         self.runtime_tolerance = runtime_tolerance
         self.identify_min_confidence = identify_min_confidence
+        self.ai_provider = ai_provider
         self.crosscheck = MetadataCrossChecker(
             omdb_api_key=omdb_api_key,
             tvdb_api_key=tvdb_api_key,
@@ -37,6 +42,14 @@ class DiscIdentifier:
         )
         self.searcher = WebSearcher(searxng_url=searxng_url, enable_legacy_ddgs=enable_web_search)
         self.os_searcher = OpenSubtitlesSearcher(api_key=opensubtitles_api_key)
+
+    def _guess_title(self, disc_label: str, runtime: int, languages: list[str]) -> dict[str, Any]:
+        """Use the configured AI provider to guess the title."""
+        if self.ai_provider == "openrouter" and self.openrouter:
+            return self.openrouter.guess_title(disc_label, {"runtime": runtime}, runtime)
+        else:
+            # Default to Ollama
+            return self.ollama.identify_from_disc(disc_label, runtime, languages)
 
     def _build_tmdb_candidates(self, llm_title: str, disc_label: str) -> list[dict]:
         candidates: list[dict] = []
@@ -159,9 +172,9 @@ class DiscIdentifier:
         runtime = pick_feature_track_runtime(disc)
         languages = sorted({lang for t in disc.tracks for lang in t.audio_languages})
         try:
-            llm_guess = self.ollama.identify_from_disc(disc.label, runtime, languages)
+            llm_guess = self._guess_title(disc.label, runtime, languages)
         except Exception:  # noqa: BLE001
-            # Keep pipeline running when Ollama is unavailable; TMDB + fallback label still work.
+            # Keep pipeline running when AI provider is unavailable; TMDB + fallback label still work.
             llm_guess = {
                 "media_type": "movie",
                 "title": disc.label.replace("_", " ").strip(),

@@ -1268,3 +1268,104 @@ def thumbnail() -> Response:
 
     mime = "image/jpeg" if found.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
     return Response(found.read_bytes(), mimetype=mime)
+
+
+@api_bp.route("/api/library/encode", methods=["POST"])
+@_auth_required
+def api_encode_library():
+    """Queue an encode job for a specific file or all items needing encoding."""
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope", "all")).strip().lower()
+
+    result = manager.queue_library_encode(scope)
+    status = 202 if result.get("ok") else 400
+    return jsonify(result), status
+
+
+@api_bp.route("/api/temp-files", methods=["GET"])
+@_auth_required
+def api_list_temp_files():
+    """List MKV files in the temp directory."""
+    settings = current_app.extensions["settings"]
+    temp_path = settings.temp_rip_path
+    
+    if not temp_path.exists():
+        return jsonify({"files": [], "path": str(temp_path), "exists": False})
+    
+    files = []
+    for f in temp_path.rglob("*.mkv"):
+        try:
+            stat = f.stat()
+            files.append({
+                "name": f.name,
+                "path": str(f.relative_to(temp_path)),
+                "size_mb": round(stat.st_size / (1024 * 1024), 1),
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        except Exception:
+            continue
+    
+    # Sort by modification time, newest first
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    
+    return jsonify({
+        "files": files,
+        "path": str(temp_path),
+        "exists": True,
+        "count": len(files)
+    })
+
+
+@api_bp.route("/api/temp-files/<path:filename>", methods=["GET"])
+@_auth_required
+def api_serve_temp_file(filename: str):
+    """Securely serve temp files with range request support for video streaming."""
+    from flask import send_file
+    
+    settings = current_app.extensions["settings"]
+    temp_path = settings.temp_rip_path
+    
+    # Security: resolve paths and ensure file is inside temp directory
+    requested = (temp_path / filename).resolve()
+    if temp_path.resolve() not in requested.parents and requested != temp_path.resolve():
+        return jsonify({"error": "Access denied"}), 403
+    
+    if not requested.exists() or not requested.is_file():
+        return jsonify({"error": "File not found"}), 404
+    
+    # Handle range requests for video seeking
+    range_header = request.headers.get("Range")
+    if range_header:
+        # Parse range header like "bytes=0-1023"
+        try:
+            ranges = range_header.replace("bytes=", "").split("-")
+            start = int(ranges[0]) if ranges[0] else 0
+            end = int(ranges[1]) if ranges[1] else requested.stat().st_size - 1
+            
+            def generate():
+                with open(requested, "rb") as f:
+                    f.seek(start)
+                    remaining = (end - start) + 1
+                    while remaining > 0:
+                        chunk_size = min(8192, remaining)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            
+            resp = current_app.response_class(
+                generate(),
+                206,
+                {
+                    "Content-Type": "video/x-matroska",
+                    "Content-Range": f"bytes {start}-{end}/{requested.stat().st_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str((end - start) + 1),
+                },
+            )
+            return resp
+        except Exception as e:
+            return jsonify({"error": f"Range request failed: {e}"}), 400
+    
+    return send_file(requested, mimetype="video/x-matroska", as_attachment=False)

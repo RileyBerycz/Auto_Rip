@@ -100,6 +100,10 @@ class Settings:
     handbrake_preset_dvd: str = os.getenv("HANDBRAKE_PRESET_DVD", "default")
     handbrake_preset_bluray: str = os.getenv("HANDBRAKE_PRESET_BLURAY", "high")
     makemkvcon_path: str = os.getenv("MAKEMKVCON_PATH", "makemkvcon")
+    # AI Provider selection: 'ollama' or 'openrouter'
+    ai_provider: str = os.getenv("AI_PROVIDER", "ollama")
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, str] | None) -> "Settings":
@@ -158,6 +162,12 @@ class Settings:
             settings.handbrake_preset_bluray = overrides["HANDBRAKE_PRESET_BLURAY"]
         if overrides.get("MAKEMKVCON_PATH"):
             settings.makemkvcon_path = overrides["MAKEMKVCON_PATH"]
+        if overrides.get("AI_PROVIDER"):
+            settings.ai_provider = overrides["AI_PROVIDER"]
+        if overrides.get("OPENROUTER_API_KEY") is not None:
+            settings.openrouter_api_key = overrides.get("OPENROUTER_API_KEY", "")
+        if overrides.get("OPENROUTER_MODEL"):
+            settings.openrouter_model = overrides["OPENROUTER_MODEL"]
 
         return settings
 
@@ -184,6 +194,9 @@ class Settings:
             "HANDBRAKE_PRESET_DVD": self.handbrake_preset_dvd,
             "HANDBRAKE_PRESET_BLURAY": self.handbrake_preset_bluray,
             "MAKEMKVCON_PATH": self.makemkvcon_path,
+            "AI_PROVIDER": self.ai_provider,
+            "OPENROUTER_API_KEY": self.openrouter_api_key,
+            "OPENROUTER_MODEL": self.openrouter_model,
         }
 
     def ensure_dirs(self) -> None:

@@ -4,7 +4,7 @@ const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
-const pages = ['dashboard', 'drives', 'jobs', 'library', 'movies', 'tv', 'history', 'ripper-status', 'settings', 'accounts']
+const pages = ['dashboard', 'drives', 'jobs', 'library', 'movies', 'tv', 'temp-files', 'history', 'ripper-status', 'settings', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -74,7 +74,6 @@ export default function App() {
   const [driveStatus, setDriveStatus] = useState({ drives: [], summary: null })
   const [jobs, setJobs] = useState([])
   const [library, setLibrary] = useState({ movies: [], tvshows: [] })
-  const [tempFiles, setTempFiles] = useState({ root: '', exists: false, entries: [], summary: { count: 0, file_count: 0, total_bytes: 0 } })
   const [maintenanceTasks, setMaintenanceTasks] = useState([])
   const [maintenanceScope, setMaintenanceScope] = useState('all')
   const [maintenanceBusy, setMaintenanceBusy] = useState(false)
@@ -98,9 +97,8 @@ export default function App() {
   // Log viewer
   const [availableLogs, setAvailableLogs] = useState([])
   const [selectedLog, setSelectedLog] = useState('')
-  const [logLines, setLogLines] = useState([])
-  const [logsLoading, setLogsLoading] = useState(false)
-  const [logsError, setLogsError] = useState('')
+  const [logContent, setLogContent] = useState('')
+  const [logLoading, setLogLoading] = useState(false)
   
   // Manual title override modal
   const [overrideModal, setOverrideModal] = useState(null) // { jobId, jobTitle }
@@ -216,6 +214,22 @@ export default function App() {
     } finally {
       authedRefreshInFlight.current = false
       setAuthedLoading(false)
+    }
+  }
+
+  const fetchTempFiles = async () => {
+    if (!token || !apiUrl) return
+    setTempFilesLoading(true)
+    try {
+      const resp = await fetch(`${apiUrl}/api/temp-files`, { headers: authHeaders })
+      const data = await resp.json().catch(() => null)
+      if (resp.ok && data) {
+        setTempFiles(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch temp files:', err)
+    } finally {
+      setTempFilesLoading(false)
     }
   }
 
@@ -1851,6 +1865,11 @@ export default function App() {
                               Rename reason: {item.rename_reason}
                             </div>
                           )}
+                          {item.suggested_name && (
+                            <div className="suggested-name" style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '4px' }}>
+                              AI suggests: {item.suggested_name}
+                            </div>
+                          )}
                         </div>
                         <p className="media-card-overview">{item.overview || item.path}</p>
                         <div className="media-card-meta">
@@ -2269,6 +2288,117 @@ export default function App() {
         </div>
       </div>
     )}
+
+    {activePage === 'temp-files' && (
+      <div className="content">
+        <div className="card">
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h2>🎬 Temp Files - Video Player</h2>
+            <button className="btn-secondary" onClick={fetchTempFiles} disabled={tempFilesLoading}>
+              {tempFilesLoading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+          
+          {tempFilesLoading ? (
+            <div className="skeleton" style={{ height: '200px' }} />
+          ) : tempFiles.files && tempFiles.files.length > 0 ? (
+            <div>
+              <p className="field-help">
+                Temp directory: <code>{tempFiles.path}</code> ({tempFiles.count} files)
+              </p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
+                {/* File List */}
+                <div>
+                  <h3>Files</h3>
+                  <div className="history-list" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                    {tempFiles.files.map((file, idx) => (
+                      <div
+                        key={idx}
+                        className={`history-item ${selectedTempFile?.name === file.name ? 'selected' : ''}`}
+                        style={{ cursor: 'pointer', padding: '8px', border: selectedTempFile?.name === file.name ? '2px solid var(--primary)' : '1px solid var(--border)' }}
+                        onClick={() => {
+                          setSelectedTempFile(file)
+                          setVideoError('')
+                        }}
+                      >
+                        <div className="history-title-row">
+                          <span className="job-title">{file.name}</span>
+                          <span className="job-state" style={{ backgroundColor: '#6b7280' }}>
+                            {file.size_mb} MB
+                          </span>
+                        </div>
+                        <div className="history-meta">
+                          <span>Modified: {new Date(file.modified).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Video Player */}
+                <div>
+                  <h3>Video Player</h3>
+                  {selectedTempFile ? (
+                    <div>
+                      <p style={{ marginBottom: '8px' }}><strong>{selectedTempFile.name}</strong></p>
+                      {videoError && (
+                        <div className="alert alert-error" style={{ marginBottom: '8px' }}>{videoError}</div>
+                      )}
+                      <video
+                        key={selectedTempFile.name}
+                        controls
+                        style={{ width: '100%', maxHeight: '500px', backgroundColor: '#000' }}
+                        src={`${apiUrl}/api/temp-files/${selectedTempFile.path}`}
+                        onError={(e) => {
+                          setVideoError('Failed to load video. The file may be corrupted or in an unsupported format.')
+                          console.error('Video error:', e)
+                        }}
+                      >
+                        Your browser does not support the video element.
+                      </video>
+                      <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            const newName = prompt('Enter new name for this file (without path):', selectedTempFile.name)
+                            if (newName && newName.trim()) {
+                              // TODO: Implement rename API endpoint
+                              showMessage('Rename functionality coming soon!', 'info')
+                            }
+                          }}
+                        >
+                          ✏️ Rename
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => {
+                            // Open in new tab for external player
+                            window.open(`${apiUrl}/api/temp-files/${selectedTempFile.path}`, '_blank')
+                          }}
+                        >
+                          🔗 Open in New Tab
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty-state" style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      Select a file from the list to play
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>No temp files found.</p>
+              <p className="field-help">Files that aren't confidently identified stay in the temp directory.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
   </div>
   )
 }

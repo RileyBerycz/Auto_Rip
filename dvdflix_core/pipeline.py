@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .clients import OllamaClient, TmdbClient
+from .clients_openrouter import OpenRouterClient
 from .config import Settings
 from .disc_cache import DiscCache
 from .encoder import encode_file
@@ -22,6 +23,15 @@ class RipPipeline:
         self.settings = settings
         self.settings.ensure_dirs()
         self.cache = DiscCache(settings.disc_cache_db)
+        
+        # Initialize AI clients based on provider setting
+        openrouter_client = None
+        if settings.ai_provider == "openrouter" and settings.openrouter_api_key:
+            openrouter_client = OpenRouterClient(
+                api_key=settings.openrouter_api_key,
+                model=settings.openrouter_model,
+            )
+        
         self.identifier = DiscIdentifier(
             cache=self.cache,
             ollama=OllamaClient(settings.ollama_url, settings.ollama_model),
@@ -34,6 +44,8 @@ class RipPipeline:
             opensubtitles_api_key=settings.opensubtitles_api_key,
             enable_web_search=settings.enable_web_search,
             searxng_url=settings.searxng_url,
+            ai_provider=settings.ai_provider,
+            openrouter=openrouter_client,
         )
         # Removed global identify_lock to allow concurrent identification across drives.
         # If GPU contention becomes an issue, control concurrency at the Ollama client or queue level instead.
