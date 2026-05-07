@@ -4,7 +4,7 @@ const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
-const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'movies', 'tv', 'history', 'accounts', 'log-viewer']
+const pages = ['dashboard', 'drives', 'jobs', 'library', 'movies', 'tv', 'history', 'ripper-status', 'settings', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -1095,16 +1095,15 @@ export default function App() {
                 title={`View the ${p.replace(/-/g, ' ')} page`}
               >
                 {p === 'dashboard' && '📊 Dashboard'}
-                {p === 'drives' && '💿 Drives'}
-                {p === 'logs' && '🧾 Logs'}
-                {p === 'ripper-status' && '⚙️ Ripper'}
-                {p === 'settings' && '⚡ Settings'}
+                {p === 'drives' && '💽 Drives'}
+                {p === 'jobs' && '📋 Jobs'}
                 {p === 'library' && '📚 Library'}
                 {p === 'movies' && '🎬 Movies'}
                 {p === 'tv' && '📺 TV Shows'}
                 {p === 'history' && '🕘 History'}
+                {p === 'ripper-status' && '⚙️ Ripper'}
+                {p === 'settings' && '⚡ Settings'}
                 {p === 'accounts' && '👤 Accounts'}
-                {p === 'log-viewer' && '📄 Log Viewer'}
               </button>
             ))}
           </nav>
@@ -1402,20 +1401,47 @@ export default function App() {
         </div>
       )}
 
-      {activePage === 'logs' && (
+      {activePage === 'jobs' && (
         <div className="content">
           <div className="card">
-            <h2>🧾 Unified Logs</h2>
-            <div className="inline-actions" style={{ marginBottom: '10px' }}>
-              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Logs</button>
+            <h2>📋 All Jobs</h2>
+            <div className="inline-actions" style={{ marginBottom: '12px' }}>
+              <button className="btn-secondary" onClick={fetchAuthedData}>Refresh Jobs</button>
             </div>
-            {allLogs.length === 0 ? (
-              <p className="empty-state">No logs yet.</p>
+            
+            {dashboardItems.length === 0 ? (
+              <p className="empty-state">No jobs yet. Insert a disc or queue maintenance tasks.</p>
             ) : (
-              <div className="job-log-box" style={{ maxHeight: '520px' }}>
-                {allLogs.map((entry, idx) => (
-                  <div key={`log-${idx}`} className="job-log-line">
-                    [{entry.source}] {entry.text}
+              <div className="jobs-list">
+                {dashboardItems.map((job) => (
+                  <div key={job.id} className="job-item">
+                    <div className="job-header">
+                      <span className="job-drive">{job.drive || (job.kind === 'maintenance' ? job.taskKind || 'maintenance' : 'system')}</span>
+                      <span className="job-title">{job.title || job.disc_label || 'Unknown'}</span>
+                      <span className="job-state" style={{ backgroundColor: jobStateColor(job.state) }}>
+                        {job.state}
+                      </span>
+                      {job.kind === 'maintenance' && <span className="badge badge-info" style={{ marginLeft: '8px' }}>Maintenance</span>}
+                    </div>
+                    {job.output_path && (
+                      <div className="job-detail" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '4px' }}>
+                        Output: {job.output_path}
+                      </div>
+                    )}
+                    {Array.isArray(job.logs) && job.logs.length > 0 && (
+                      <div className="job-log-box" style={{ maxHeight: '200px' }}>
+                        {job.logs.slice(-30).map((line, idx) => (
+                          <div key={`${job.id}-line-${idx}`} className="job-log-line">{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="inline-actions" style={{ marginTop: '8px' }}>
+                      {(job.state === 'queued' || job.state === 'running' || job.state === 'pending') && (
+                        <button className="btn-secondary" onClick={() => cancelJob(job.id)}>
+                          Cancel Job
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1522,73 +1548,7 @@ export default function App() {
               </div>
             )}
           </div>
-
-          <div className="card">
-            <h2>🛠️ Post-Rip Pipeline</h2>
-            <div className="form-group">
-              <label>Scope</label>
-              <select value={maintenanceScope} onChange={(e) => setMaintenanceScope(e.target.value)}>
-                <option value="all">all (movies + tv)</option>
-                <option value="movies">movies only</option>
-                <option value="tv">tv only</option>
-              </select>
-            </div>
-            <div className="inline-actions">
-              <button className="btn-secondary" onClick={runEncodeLibrary} title="Queue a background encode job for the selected library scope">
-                Queue Encode Library
-              </button>
-              <button className="btn-secondary" onClick={runRenameLibrary} title="Queue a background rename job for the selected library scope">
-                Queue Rename Library
-              </button>
-              <button className="btn-secondary" onClick={fetchAuthedData} title="Refresh maintenance task status from the backend">
-                Refresh Tasks
-              </button>
-            </div>
-
-            {maintenanceTasks.length === 0 ? (
-              <p className="empty-state">No maintenance tasks yet.</p>
-            ) : (
-              <div className="jobs-list" style={{ marginTop: '12px' }}>
-                {maintenanceTasks.slice(0, 10).map((task) => (
-                  <div key={task.id} className="job-item">
-                    <div className="job-header">
-                      <span className="job-drive">{task.kind}</span>
-                      <span className="job-title">{task.id}</span>
-                      <span className="job-state" style={{ backgroundColor: jobStateColor(task.state === 'running' ? 'ripping' : task.state === 'complete' ? 'complete' : task.state === 'failed' ? 'failed' : 'pending') }}>
-                        {task.state}
-                      </span>
-                    </div>
-                    {task.title && (
-                      <div className="job-detail" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '4px' }}>
-                        Title: {task.title}
-                      </div>
-                    )}
-                    {task.output_path && (
-                      <div className="job-detail" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '2px' }}>
-                        Output: {task.output_path}
-                      </div>
-                    )}
-                    {Array.isArray(task.logs) && task.logs.length > 0 && (
-                      <div className="job-log-box">
-                        {task.logs.slice(-80).map((line, idx) => (
-                          <div key={`${task.id}-line-${idx}`} className="job-log-line">{line}</div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="inline-actions" style={{ marginTop: '8px' }}>
-                      {(task.state === 'queued' || task.state === 'running') && (
-                        <button className="btn-secondary" onClick={() => cancelMaintenanceTask(task.id)}>
-                          Terminate Task
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+        )}
 
       {activePage === 'settings' && (
         <div className="content">
