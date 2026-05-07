@@ -1821,6 +1821,11 @@ export default function App() {
                             <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
                           )}
                         </div>
+                        {item.needs_encode && item.encode_reason && (
+                          <div className="encode-reason" style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '4px' }}>
+                            Reason: {item.encode_reason}
+                          </div>
+                        )}
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
                             {maintenanceButtonLabel('Encode', 'Queueing encode item')}
@@ -1910,6 +1915,11 @@ export default function App() {
                             <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
                           )}
                         </div>
+                        {item.needs_encode && item.encode_reason && (
+                          <div className="encode-reason" style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '4px' }}>
+                            Reason: {item.encode_reason}
+                          </div>
+                        )}
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
                             {maintenanceButtonLabel('Encode', 'Queueing encode item')}

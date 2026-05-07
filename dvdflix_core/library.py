@@ -83,18 +83,21 @@ def _is_h265_encoded(src: Path) -> bool:
         return False
 
 
-def _needs_encode(mkv_paths: list[Path]) -> bool:
+def _needs_encode(mkv_paths: list[Path]) -> tuple[bool, str | None]:
+    """Check if any video file needs encoding and return reason."""
     for path in mkv_paths:
-        if _is_h265_encoded(path):
-            continue
         try:
-            _, height = get_video_resolution(path)
-            if height <= 720:
-                continue
+            codec = get_video_codec(path)
+            # If codec is None or not HEVC/H.265, it needs encoding
+            if not codec or codec.lower() not in {"hevc", "h265", "x265"}:
+                if codec:
+                    return True, f"Codec is {codec} (not HEVC)"
+                else:
+                    return True, "Could not detect codec"
         except Exception:
-            return True
-        return True
-    return False
+            # If we can't determine codec, assume it needs encoding to be safe
+            return True, "Error reading codec"
+    return False, None
 
 
 def _build_poster_url(poster_path: str | None) -> str | None:
@@ -155,6 +158,7 @@ def _scan_folder_item(path: Path, root: Path, media_type: str, tmdb_api_key: str
     
     # Get encoding specs from first MKV file
     encoding_specs = _extract_encoding_specs(mkv_paths[0])
+    needs_encode, encode_reason = _needs_encode(mkv_paths)
     
     item = {
         "path": str(path.relative_to(root)),
@@ -166,7 +170,8 @@ def _scan_folder_item(path: Path, root: Path, media_type: str, tmdb_api_key: str
         "genres": metadata.get("genres", []),
         "rating": metadata.get("rating"),
         "tmdb_id": metadata.get("tmdb_id"),
-        "needs_encode": _needs_encode(mkv_paths),
+        "needs_encode": needs_encode,
+        "encode_reason": encode_reason,
         "needs_rename": _needs_rename(path.name),
         "file_count": len(mkv_paths),
         "item_type": "folder",
@@ -184,6 +189,7 @@ def _scan_file_item(path: Path, root: Path, media_type: str, tmdb_api_key: str) 
     
     # Get encoding specs from this MKV file
     encoding_specs = _extract_encoding_specs(path)
+    needs_encode, encode_reason = _needs_encode([path])
     
     item = {
         "path": str(path.relative_to(root)),
@@ -195,7 +201,8 @@ def _scan_file_item(path: Path, root: Path, media_type: str, tmdb_api_key: str) 
         "genres": metadata.get("genres", []),
         "rating": metadata.get("rating"),
         "tmdb_id": metadata.get("tmdb_id"),
-        "needs_encode": not path.name.lower().endswith(".x265.mkv"),
+        "needs_encode": needs_encode,
+        "encode_reason": encode_reason,
         "needs_rename": _needs_rename(path.name),
         "file_count": 1,
         "item_type": "file",
