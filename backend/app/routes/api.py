@@ -489,11 +489,24 @@ def capabilities() -> tuple:
     manager = _manager()
     settings = manager.settings
 
+    # Check tools in multiple possible locations
+    def check_tool(name: str, configured_path: str = None) -> bool:
+        """Check if tool exists and is executable in multiple locations."""
+        # Check configured path first
+        if configured_path and Path(configured_path).exists():
+            return True
+        # Check common binary locations
+        for prefix in ["/usr/bin", "/usr/local/bin", "/usr/bin"]:
+            if Path(f"{prefix}/{name}").exists():
+                return True
+        # Fall back to PATH lookup
+        return bool(shutil.which(name))
+    
     tools = {
-        "lsdvd": Path("/usr/bin/lsdvd").exists() or bool(shutil.which("lsdvd")),
-        "makemkvcon": Path(settings.makemkvcon_path).exists() or Path("/usr/bin/makemkvcon").exists(),
-        "eject": Path("/usr/bin/eject").exists() or bool(shutil.which("eject")),
-        "handbrake": bool(shutil.which("HandBrakeCLI")),
+        "lsdvd": check_tool("lsdvd"),
+        "makemkvcon": check_tool("makemkvcon", settings.makemkvcon_path),
+        "eject": check_tool("eject"),
+        "handbrake": check_tool("HandBrakeCLI"),
     }
 
     # Use both configured drives and runtime-detected drives to assess availability.
