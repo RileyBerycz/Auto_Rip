@@ -4,7 +4,7 @@ const envApiUrl = import.meta.env.VITE_API_URL || ''
 const AUTO_REFRESH_MS = 8000
 const SETUP_REFRESH_MS = 12000
 
-const pages = ['dashboard', 'drives', 'logs', 'ripper-status', 'settings', 'library', 'movies', 'tv', 'history', 'accounts', 'log-viewer']
+const pages = ['dashboard', 'drives', 'jobs', 'library', 'movies', 'tv', 'history', 'ripper-status', 'settings', 'accounts']
 
 const pipelineStages = [
   'lsdvd scan for disc label, track durations, and audio languages',
@@ -1861,6 +1861,11 @@ export default function App() {
                             <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
                           )}
                         </div>
+                        {item.needs_encode && item.encode_reason && (
+                          <div className="encode-reason" style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '4px' }}>
+                            Reason: {item.encode_reason}
+                          </div>
+                        )}
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
                             {maintenanceButtonLabel('Encode', 'Queueing encode item')}
@@ -1950,6 +1955,11 @@ export default function App() {
                             <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
                           )}
                         </div>
+                        {item.needs_encode && item.encode_reason && (
+                          <div className="encode-reason" style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '4px' }}>
+                            Reason: {item.encode_reason}
+                          </div>
+                        )}
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
                             {maintenanceButtonLabel('Encode', 'Queueing encode item')}
