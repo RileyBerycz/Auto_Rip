@@ -490,9 +490,9 @@ def capabilities() -> tuple:
     settings = manager.settings
 
     tools = {
-        "lsdvd": bool(shutil.which("lsdvd")),
-        "makemkvcon": _tool_exists(settings.makemkvcon_path),
-        "eject": bool(shutil.which("eject")),
+        "lsdvd": Path("/usr/bin/lsdvd").exists() or bool(shutil.which("lsdvd")),
+        "makemkvcon": Path(settings.makemkvcon_path).exists() or Path("/usr/bin/makemkvcon").exists(),
+        "eject": Path("/usr/bin/eject").exists() or bool(shutil.which("eject")),
         "handbrake": bool(shutil.which("HandBrakeCLI")),
     }
 
@@ -537,7 +537,14 @@ def capabilities() -> tuple:
             {
                 "ok": True,
                 "ripper_ready": ripper_ready,
-                "tools": tools,
+                "tools": {
+                    "lsdvd": tools["lsdvd"],
+                    "makemkvcon": tools["makemkvcon"],
+                    "eject": tools["eject"],
+                    "handbrake": tools["handbrake"],
+                    "lsdvd_path": "/usr/bin/lsdvd" if tools["lsdvd"] else None,
+                    "makemkvcon_path": str(settings.makemkvcon_path) if tools["makemkvcon"] else None,
+                },
                 "drives": drive_status,
                 "issues": issues,
                 "hints": hints,

@@ -1440,12 +1440,14 @@ export default function App() {
                 <span className={`badge ${capabilities?.tools?.lsdvd ? 'ok' : 'bad'}`}>
                   {capabilities?.tools?.lsdvd ? '✓' : '✗'}
                 </span>
+                {capabilities?.tools?.lsdvd_path && <span className="health-path">{capabilities.tools.lsdvd_path}</span>}
               </div>
               <div className="health-item">
                 <span className="label">makemkvcon</span>
                 <span className={`badge ${capabilities?.tools?.makemkvcon ? 'ok' : 'bad'}`}>
                   {capabilities?.tools?.makemkvcon ? '✓' : '✗'}
                 </span>
+                {capabilities?.tools?.makemkvcon_path && <span className="health-path">{capabilities.tools.makemkvcon_path}</span>}
               </div>
               <div className="health-item">
                 <span className="label">eject</span>
@@ -1453,7 +1455,18 @@ export default function App() {
                   {capabilities?.tools?.eject ? '✓' : '✗'}
                 </span>
               </div>
+              <div className="health-item">
+                <span className="label">HandBrake</span>
+                <span className={`badge ${capabilities?.tools?.handbrake ? 'ok' : 'bad'}`}>
+                  {capabilities?.tools?.handbrake ? '✓' : '✗'}
+                </span>
+              </div>
             </div>
+            {capabilities?.tools?.makemkvcon && capabilities?.tools?.lsdvd && capabilities?.tools?.eject && (
+              <div className="health-note" style={{ marginTop: '8px', fontSize: '0.85rem', color: 'var(--muted)' }}>
+                All ripper tools are available and ready.
+              </div>
+            )}
           </div>
 
           {capabilities?.issues?.length > 0 && (
@@ -1545,6 +1558,16 @@ export default function App() {
                         {task.state}
                       </span>
                     </div>
+                    {task.title && (
+                      <div className="job-detail" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '4px' }}>
+                        Title: {task.title}
+                      </div>
+                    )}
+                    {task.output_path && (
+                      <div className="job-detail" style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '2px' }}>
+                        Output: {task.output_path}
+                      </div>
+                    )}
                     {Array.isArray(task.logs) && task.logs.length > 0 && (
                       <div className="job-log-box">
                         {task.logs.slice(-80).map((line, idx) => (
@@ -1824,6 +1847,19 @@ export default function App() {
                         <div className="media-card-meta">
                           <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
                           {item.rating ? <span>★ {item.rating}</span> : null}
+                          {item.encoding_specs?.codec && (
+                            <span className="badge badge-info" title="Video codec">
+                              {item.encoding_specs.codec}
+                            </span>
+                          )}
+                          {item.encoding_specs?.quality_tier && (
+                            <span className="badge badge-info" title="Video quality">
+                              {item.encoding_specs.quality_tier}
+                            </span>
+                          )}
+                          {item.encoding_specs?.encoded && (
+                            <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
+                          )}
                         </div>
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('movies', item.path)} disabled={maintenanceBusy || authedLoading} title={`Encode this library item: ${item.path}`}>
@@ -1900,6 +1936,19 @@ export default function App() {
                         <div className="media-card-meta">
                           <span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>
                           {item.rating ? <span>★ {item.rating}</span> : null}
+                          {item.encoding_specs?.codec && (
+                            <span className="badge badge-info" title="Video codec">
+                              {item.encoding_specs.codec}
+                            </span>
+                          )}
+                          {item.encoding_specs?.quality_tier && (
+                            <span className="badge badge-info" title="Video quality">
+                              {item.encoding_specs.quality_tier}
+                            </span>
+                          )}
+                          {item.encoding_specs?.encoded && (
+                            <span className="badge badge-success" title="Already encoded to HEVC">HEVC</span>
+                          )}
                         </div>
                         <div className="media-card-actions">
                           <button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>
