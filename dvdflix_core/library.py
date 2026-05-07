@@ -6,7 +6,7 @@ from typing import Any
 
 from .clients import TmdbClient
 from .config import Settings
-from .encoder import get_video_codec, get_video_resolution__
+from .encoder import get_video_codec, get_video_resolution
 from .nfo import _parse_folder_title_year
 
 TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w300"
