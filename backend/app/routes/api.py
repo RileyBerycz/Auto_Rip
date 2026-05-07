@@ -1271,11 +1271,12 @@ def thumbnail() -> Response:
 
 
 @api_bp.route("/api/library/encode", methods=["POST"])
-@_auth_required
+@require_auth
 def api_encode_library():
     """Queue an encode job for a specific file or all items needing encoding."""
     payload = request.get_json(silent=True) or {}
     scope = str(payload.get("scope", "all")).strip().lower()
+    manager = _manager()
 
     result = manager.queue_library_encode(scope)
     status = 202 if result.get("ok") else 400
@@ -1283,7 +1284,7 @@ def api_encode_library():
 
 
 @api_bp.route("/api/temp-files", methods=["GET"])
-@_auth_required
+@require_auth
 def api_list_temp_files():
     """List MKV files in the temp directory."""
     settings = current_app.extensions["settings"]
@@ -1317,7 +1318,7 @@ def api_list_temp_files():
 
 
 @api_bp.route("/api/temp-files/<path:filename>", methods=["GET"])
-@_auth_required
+@require_auth
 def api_serve_temp_file(filename: str):
     """Securely serve temp files with range request support for video streaming."""
     from flask import send_file

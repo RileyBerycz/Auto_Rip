@@ -1,5 +1,5 @@
 # Stage 1: Build React frontend
-FROM node:20-slim AS frontend-builder
+FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --frozen-lockfile
