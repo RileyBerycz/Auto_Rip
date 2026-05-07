@@ -70,22 +70,6 @@ class OpenRouterClient:
         raw = self.generate(prompt)
         return self._parse_title_guess(raw, disc_label)
 
-    def suggest_name(self, current_name: str, file_samples: list[str] = None) -> str | None:
-        """Use OpenRouter to suggest a clean name for a file or folder."""
-        if not self.api_key:
-            return None
-
-        prompt = f"""You are helping rename files in a media library.
-Current name: "{current_name}"
-{f"File samples: {file_samples}" if file_samples else ""}
-
-Return ONLY the suggested clean name in the format "Title (Year)" for movies or "Show Name (Year)" for TV shows.
-Do not include quotes, explanations, or extra text. Just the name.
-If the current name is already good, return it unchanged.
-"""
-        result = self.generate(prompt, temperature=0.1, max_tokens=100)
-        return result.strip() if result else None
-
     def _build_identification_prompt(self, disc_label: str, lsdvd_summary: dict[str, Any], runtime_minutes: int) -> str:
         """Build the prompt for title identification."""
         tracks = lsdvd_summary.get("tracks", [])

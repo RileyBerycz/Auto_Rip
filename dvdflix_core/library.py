@@ -40,10 +40,6 @@ def _extract_encoding_specs(mkv_path: Path) -> dict[str, Any]:
     return specs
 
 
-def _normalize_name(name: str) -> str:
-    return re.sub(r"[_.]+", " ", name).strip()
-
-
 def _needs_rename(name: str, path: Path | None = None, ollama_url: str = "", ollama_model: str = "qwen2.5:7b", ai_provider: str = "ollama", openrouter_api_key: str = "", openrouter_model: str = "google/gemini-2.0-flash-001") -> tuple[bool, str | None, str | None]:
     """Check if item needs renaming and return reason + AI suggestion."""
     # Check for bad characters/patterns
@@ -129,16 +125,6 @@ EXTRA_FOLDER_NAMES = {
 def _is_extra_path(path: Path, root: Path) -> bool:
     rel = path.relative_to(root)
     return any(part.lower() in EXTRA_FOLDER_NAMES for part in rel.parts)
-
-
-def _is_h265_encoded(src: Path) -> bool:
-    if src.name.lower().endswith(".x265.mkv"):
-        return True
-    try:
-        codec = get_video_codec(src)
-        return codec in {"hevc", "h265", "x265"}
-    except Exception:
-        return False
 
 
 def _needs_encode(mkv_paths: list[Path]) -> tuple[bool, str | None]:

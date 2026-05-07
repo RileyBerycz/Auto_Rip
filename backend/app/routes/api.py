@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import shutil
 import subprocess
@@ -309,7 +309,7 @@ def setup_ollama_models() -> tuple:
     """Attempt to query the configured Ollama URL (or provided url query param)
     and return a simple list of model names. This endpoint is intentionally
     unauthenticated so it can be used during initial setup.
-    Query param: url (optional) — overrides stored OLLAMA_URL.
+    Query param: url (optional) â€” overrides stored OLLAMA_URL.
     """
     manager = _manager()
     url = (request.args.get("url") or manager.settings.ollama_url or "").strip()
