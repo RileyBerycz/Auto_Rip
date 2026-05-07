@@ -1293,6 +1293,11 @@ export default function App() {
                     <p className="media-card-overview">{item.overview || item.path}</p>
                     <div className="media-card-meta"><span>{item.file_count} file{item.file_count === 1 ? '' : 's'}</span>{item.rating ? <span>★ {item.rating}</span> : null}</div>
                     <div className="media-card-actions"><button className="btn-secondary" onClick={() => runEncodeItem('tv', item.path)} disabled={maintenanceBusy || authedLoading}>{maintenanceButtonLabel('Encode', 'Queueing encode item')}</button><button className="btn-secondary" onClick={() => runRenameItem('tv', item.path)} disabled={maintenanceBusy || authedLoading} style={{ marginLeft: '8px' }}>{maintenanceButtonLabel('Rename', 'Queueing rename item')}</button></div>
+                    {item.needs_rename && item.rename_reason && (
+                      <div className="rename-reason" style={{ fontSize: '0.8rem', color: 'var(--info)', marginTop: '4px' }}>
+                        Rename reason: {item.rename_reason}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1766,11 +1771,11 @@ export default function App() {
                 <button className="btn-secondary" onClick={fetchAuthedData} disabled={authedLoading}>
                   {authedLoading ? 'Refreshing…' : 'Refresh Library'}
                 </button>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('all')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch encode all', 'Queueing encode all')}
+                <button className="btn-secondary" disabled={true} title="Disabled: Use individual item actions instead">
+                  Batch encode all
                 </button>
-                <button className="btn-secondary" onClick={() => runRenameLibrary('all')} disabled={maintenanceBusy || authedLoading}>
-                  {maintenanceButtonLabel('Batch rename all', 'Queueing rename all')}
+                <button className="btn-secondary" disabled={true} title="Disabled: Use individual item actions instead">
+                  Batch rename all
                 </button>
               </div>
             </div>
@@ -1814,10 +1819,10 @@ export default function App() {
                 </label>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('movies')} disabled={true} title="Disabled: Use individual item actions instead">
                   {maintenanceButtonLabel('Batch encode movies', 'Queueing encode movies')}
                 </button>
-                <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={maintenanceBusy || authedLoading}>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('movies')} disabled={true} title="Disabled: Use individual item actions instead">
                   {maintenanceButtonLabel('Batch rename movies', 'Queueing rename movies')}
                 </button>
                 <button className="btn-secondary" onClick={() => setActivePage('movies')}>View all movies</button>
@@ -1841,7 +1846,11 @@ export default function App() {
                         <div className="media-card-title-row">
                           <h3>{item.title}{item.year ? ` (${item.year})` : ''}</h3>
                           {item.needs_encode && <span className="badge badge-warning">Encode</span>}
-                          {item.needs_rename && <span className="badge badge-info">Rename</span>}
+                          {item.needs_rename && item.rename_reason && (
+                            <div className="rename-reason" style={{ fontSize: '0.8rem', color: 'var(--info)', marginTop: '4px' }}>
+                              Rename reason: {item.rename_reason}
+                            </div>
+                          )}
                         </div>
                         <p className="media-card-overview">{item.overview || item.path}</p>
                         <div className="media-card-meta">
@@ -1908,10 +1917,10 @@ export default function App() {
                 <h2>📺 TV Shows ({library.tvshows.length})</h2>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                <button className="btn-secondary" onClick={() => runEncodeLibrary('tv')} disabled={true} title="Disabled: Use individual item actions instead">
                   {maintenanceButtonLabel('Batch encode TV shows', 'Queueing encode tv')}
                 </button>
-                <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={maintenanceBusy || authedLoading}>
+                <button className="btn-secondary" onClick={() => runRenameLibrary('tv')} disabled={true} title="Disabled: Use individual item actions instead">
                   {maintenanceButtonLabel('Batch rename TV shows', 'Queueing rename tv')}
                 </button>
                 <button className="btn-secondary" onClick={() => setActivePage('tv')}>View all TV</button>

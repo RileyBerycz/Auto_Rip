@@ -44,12 +44,29 @@ def _normalize_name(name: str) -> str:
     return re.sub(r"[_.]+", " ", name).strip()
 
 
-def _needs_rename(name: str) -> bool:
-    if "__" in name or " _" in name or "_" in name or "." in name:
-        return True
+def _needs_rename(name: str, path: Path | None = None) -> tuple[bool, str | None]:
+    """Check if item needs renaming and return reason."""
+    # Check for bad characters/patterns
+    if "__" in name or " _" in name or name.startswith("_") or name.endswith("_"):
+        return True, "Contains underscores or double underscores"
+    if "." in name:
+        return True, "Contains dots (not standard naming)"
     if "  " in name:
-        return True
-    return False
+        return True, "Contains double spaces"
+    
+    # Check for extras/specials folders that shouldnt be in main library
+    name_lower = name.lower()
+    EXTRA_KEYWORDS = ["extra", "bonus", "special", "feature", "trailer", "deleted scene"]
+    if any(keyword in name_lower for keyword in EXTRA_KEYWORDS):
+        return True, f"Appears to be extras/special features: {name}"
+    
+    # Check if parent folder indicates this is in wrong location
+    if path and path.parent:
+        parent_name = path.parent.name.lower()
+        if any(keyword in parent_name for keyword in EXTRA_KEYWORDS):
+            return True, f"Parent folder suggests extras/specials: {path.parent.name}"
+    
+    return False, None
 
 
 EXTRA_FOLDER_NAMES = {
@@ -84,16 +101,20 @@ def _is_h265_encoded(src: Path) -> bool:
 
 
 def _needs_encode(mkv_paths: list[Path]) -> tuple[bool, str | None]:
-    """Check if any video file needs encoding and return reason."""
+    """Check if any video file needs encoding (MPEG-2, MPEG-4, VC-1, etc. - anything not HEVC)."""
     for path in mkv_paths:
         try:
             codec = get_video_codec(path)
-            # If codec is None or not HEVC/H.265, it needs encoding
+            # If already HEVC/H.265, check if file is still too large
+            if codec and codec.lower() in {"hevc", "h265", "x265"}:
+                # Check file size - if > 5GB for movie or > 2GB for TV episode, still encode
+                size_gb = path.stat().st_size / (1024**3)
+                if size_gb > 5:  # Movies > 5GB or TV episodes > 2GB might benefit from re-encoding
+                    return True, f"HEVC file still too large: {size_gb:.1f}GB"
+                return False, None  # HEVC and reasonable size - no encode needed
+            # Non-HEVC codecs need encoding
             if not codec or codec.lower() not in {"hevc", "h265", "x265"}:
-                if codec:
-                    return True, f"Codec is {codec} (not HEVC)"
-                else:
-                    return True, "Could not detect codec"
+                return True, f"Codec is {codec} (not HEVC)"
         except Exception:
             # If we can't determine codec, assume it needs encoding to be safe
             return True, "Error reading codec"
@@ -172,7 +193,8 @@ def _scan_folder_item(path: Path, root: Path, media_type: str, tmdb_api_key: str
         "tmdb_id": metadata.get("tmdb_id"),
         "needs_encode": needs_encode,
         "encode_reason": encode_reason,
-        "needs_rename": _needs_rename(path.name),
+        "needs_rename": _needs_rename(path.name, path)[0],
+        "rename_reason": _needs_rename(path.name, path)[1],
         "file_count": len(mkv_paths),
         "item_type": "folder",
         "encoding_specs": encoding_specs,
@@ -203,7 +225,8 @@ def _scan_file_item(path: Path, root: Path, media_type: str, tmdb_api_key: str) 
         "tmdb_id": metadata.get("tmdb_id"),
         "needs_encode": needs_encode,
         "encode_reason": encode_reason,
-        "needs_rename": _needs_rename(path.name),
+        "needs_rename": _needs_rename(path.name, path)[0],
+        "rename_reason": _needs_rename(path.name, path)[1],
         "file_count": 1,
         "item_type": "file",
         "encoding_specs": encoding_specs,
